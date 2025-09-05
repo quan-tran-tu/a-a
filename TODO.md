@@ -1,0 +1,5 @@
+- Add series of actions from single prompt: eg. search for information and summarize
+- Each actions in the same serie can have its own goroutine: eg. crawl for html content of different web pages
+- Each series of actions can have its own goroutine: eg. no serie bottleneck
+- File-related action should know the surrounding enviroment: eg. create a file at /src -> where is /src
+- More complicated series of actions: eg. create new github repo: first go to github.com, get steps to create new repo, at each step parse the html source to act accordingly
