@@ -1,23 +1,24 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os/exec"
 	"runtime"
 )
 
-func Search(query string) error {
+func Search(ctx context.Context, query string) error {
 	searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
 	case "linux":
-		cmd = exec.Command("xdg-open", searchURL)
+		cmd = exec.CommandContext(ctx, "xdg-open", searchURL)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", searchURL)
+		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", searchURL)
 	case "darwin":
-		cmd = exec.Command("open", searchURL)
+		cmd = exec.CommandContext(ctx, "open", searchURL)
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

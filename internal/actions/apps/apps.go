@@ -1,21 +1,22 @@
 package apps
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
 )
 
-func Open(appName string) error {
+func Open(ctx context.Context, appName string) error {
 	var cmd *exec.Cmd
 
 	switch runtime.GOOS {
 	case "windows":
 		cmd = exec.Command("cmd", "/c", "start", appName)
 	case "darwin":
-		cmd = exec.Command("open", "-a", appName)
+		cmd = exec.CommandContext(ctx, "open", "-a", appName)
 	case "linux":
-		cmd = exec.Command(appName)
+		cmd = exec.CommandContext(ctx, appName)
 	default:
 		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
 	}

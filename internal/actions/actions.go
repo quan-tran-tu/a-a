@@ -1,6 +1,7 @@
 package actions
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 	"a-a/internal/parser"
 )
 
-func Execute(action *parser.Action) (map[string]any, error) {
+func Execute(ctx context.Context, action *parser.Action) (map[string]any, error) {
 	actionParts := strings.Split(action.Action, ".")
 	if len(actionParts) != 2 {
 		return nil, fmt.Errorf("invalid action type format: '%s'", action.Action)
@@ -23,13 +24,13 @@ func Execute(action *parser.Action) (map[string]any, error) {
 
 	switch category {
 	case "system":
-		return handleSystemAction(operation, action.Payload)
+		return handleSystemAction(ctx, operation, action.Payload)
 	case "web":
-		return handleWebAction(operation, action.Payload)
+		return handleWebAction(ctx, operation, action.Payload)
 	case "apps":
-		return handleAppsAction(operation, action.Payload)
+		return handleAppsAction(ctx, operation, action.Payload)
 	case "tools":
-		return handleToolsAction(operation, action.Payload)
+		return handleToolsAction(ctx, operation, action.Payload)
 	case "llm":
 		return handleLlmAction(operation, action.Payload)
 	case "intent":
@@ -75,7 +76,7 @@ func getStringSlicePayload(payload map[string]any, key string) ([]string, error)
 	return slice, nil
 }
 
-func handleSystemAction(operation string, payload map[string]any) (map[string]any, error) {
+func handleSystemAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	path, err := getStringPayload(payload, "path")
 	if err != nil {
 		if _, ok := payload["content"]; !ok && operation != "write_file" {
@@ -103,33 +104,33 @@ func handleSystemAction(operation string, payload map[string]any) (map[string]an
 	}
 }
 
-func handleWebAction(operation string, payload map[string]any) (map[string]any, error) {
+func handleWebAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	case "search":
 		query, err := getStringPayload(payload, "query")
 		if err != nil {
 			return nil, err
 		}
-		return nil, web.Search(query)
+		return nil, web.Search(ctx, query)
 	default:
 		return nil, fmt.Errorf("unknown web operation: %s", operation)
 	}
 }
 
-func handleAppsAction(operation string, payload map[string]any) (map[string]any, error) {
+func handleAppsAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	case "open":
 		appName, err := getStringPayload(payload, "appName")
 		if err != nil {
 			return nil, err
 		}
-		return nil, apps.Open(appName)
+		return nil, apps.Open(ctx, appName)
 	default:
 		return nil, fmt.Errorf("unknown app operation: %s", operation)
 	}
 }
 
-func handleToolsAction(operation string, payload map[string]any) (map[string]any, error) {
+func handleToolsAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	case "git":
 		subcommand, err := getStringPayload(payload, "subcommand")
@@ -142,7 +143,7 @@ func handleToolsAction(operation string, payload map[string]any) (map[string]any
 		}
 		path, _ := payload["path"].(string)
 
-		return nil, tools.HandleGit(subcommand, args, path)
+		return nil, tools.HandleGit(ctx, subcommand, args, path)
 	default:
 		return nil, fmt.Errorf("unknown tool operation: %s", operation)
 	}

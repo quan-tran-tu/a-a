@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"a-a/internal/actions"
 	"a-a/internal/listener"
@@ -18,6 +20,8 @@ import (
 
 var highPriorityQueue = make(chan *parser.ExecutionPlan, 100)
 var normalPriorityQueue = make(chan *parser.ExecutionPlan, 100)
+
+const actionTimeout = 30 * time.Second
 
 func worker() {
 	for {
@@ -71,7 +75,13 @@ func executePlan(plan *parser.ExecutionPlan) {
 
 	// Iterate through each stage sequentially.
 	for _, stage := range plan.Plan {
+		// Create a context that can be cancelled if any action in this stage fails.
+		stageCtx, cancelStage := context.WithCancel(context.Background())
+		defer cancelStage() // Ensure cleanup
+
 		var wg sync.WaitGroup
+		// Create a channel to receive the first error that occurs.
+		errChan := make(chan error, len(stage.Actions))
 
 		// Launch all actions within the current stage in parallel.
 		for _, action := range stage.Actions {
@@ -80,12 +90,17 @@ func executePlan(plan *parser.ExecutionPlan) {
 			go func(act parser.Action) {
 				defer wg.Done()
 
+				// Create a new context for this specific action with its own timeout.
+				// This context is a child of the stage's context.
+				actionCtx, cancelAction := context.WithTimeout(stageCtx, actionTimeout)
+				defer cancelAction()
+
 				// Before executing, resolve any placeholders in the payload.
 				act.Payload = resolvePayload(act.Payload, results, &resultsMutex)
 
-				output, err := actions.Execute(&act)
+				output, err := actions.Execute(actionCtx, &act)
 				if err != nil {
-					fmt.Printf("\nError during '%s' (%s): %v\n> ", act.Action, act.ID, err)
+					errChan <- fmt.Errorf("action '%s' (%s) failed: %w", act.Action, act.ID, err)
 					return
 				}
 
@@ -97,8 +112,21 @@ func executePlan(plan *parser.ExecutionPlan) {
 				}
 			}(action)
 		}
-		// Wait for all goroutines in the current stage to finish before proceeding.
-		wg.Wait()
+		// Goroutine to wait for all actions to finish and then close the error channel.
+		waiter := make(chan struct{})
+		go func() {
+			wg.Wait()
+			close(waiter)
+		}()
+
+		// Wait for either the first error or for all actions to complete.
+		select {
+		case err := <-errChan:
+			fmt.Printf("\n--- Stage Failed ---\nError: %v\nCancelling remaining actions in stage and aborting plan.\n> ", err)
+			cancelStage()
+			return
+		case <-waiter:
+		}
 	}
 
 	summary := strings.Join(allActionNames, " ")

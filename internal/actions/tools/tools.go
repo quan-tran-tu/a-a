@@ -1,11 +1,12 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 )
 
-func HandleGit(subcommand string, args []string, path string) error {
+func HandleGit(ctx context.Context, subcommand string, args []string, path string) error {
 	// Provide a security whitelist for git subcommand
 	switch subcommand {
 	case "clone", "commit", "push", "pull", "init", "status", "add":
@@ -14,7 +15,7 @@ func HandleGit(subcommand string, args []string, path string) error {
 	}
 
 	cmdArgs := append([]string{subcommand}, args...)
-	cmd := exec.Command("git", cmdArgs...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 
 	// If a specific path is provided, run the command there.
 	if path != "" {
