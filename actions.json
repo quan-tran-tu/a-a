@@ -1,0 +1,75 @@
+{
+  "actions": [
+    {
+      "name": "system.create_file",
+      "description": "Creates a new empty file.",
+      "payload_schema": {
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "system.delete_file",
+      "description": "Deletes a file.",
+      "payload_schema": {
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "system.create_folder",
+      "description": "Creates a new directory.",
+      "payload_schema": {
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "system.delete_folder",
+      "description": "Deletes a directory and all its contents.",
+      "payload_schema": {
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "system.write_file",
+      "description": "Writes or appends content to a file.",
+      "payload_schema": {
+        "required": ["path", "content"]
+      }
+    },
+    {
+      "name": "web.search",
+      "description": "Searches the web using Google.",
+      "payload_schema": {
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "apps.open",
+      "description": "Opens a desktop application.",
+      "payload_schema": {
+        "required": ["appName"]
+      }
+    },
+    {
+      "name": "intent.unknown",
+      "description": "Use this when the user's intent cannot be matched to any other action.",
+      "payload_schema": {
+        "required": ["original_text"]
+      }
+    },
+    {
+      "name": "tools.git",
+      "description": "Executes a 'git' version control command. Use this for operations like clone, commit, push, pull, etc.",
+      "payload_schema": {
+        "required": ["subcommand"],
+        "optional": ["args", "path"]
+      }
+    },
+    {
+      "name": "llm.generate_content",
+      "description": "Prompts a large language model to generate content.",
+      "payload_schema": {
+          "required": ["prompt"]
+      }
+    }
+  ]
+}

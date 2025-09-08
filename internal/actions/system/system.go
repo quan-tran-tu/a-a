@@ -11,7 +11,7 @@ func CreateFile(path string) error {
 		return fmt.Errorf("could not create file: %w", err)
 	}
 	defer file.Close()
-	fmt.Printf("File created: %s\n", path)
+
 	return nil
 }
 
@@ -20,7 +20,7 @@ func DeleteFile(path string) error {
 	if err != nil {
 		return fmt.Errorf("could not delete file: %w", err)
 	}
-	fmt.Printf("File deleted: %s\n", path)
+
 	return nil
 }
 
@@ -29,7 +29,7 @@ func CreateFolder(path string) error {
 	if err != nil {
 		return fmt.Errorf("could not create folder: %w", err)
 	}
-	fmt.Printf("Folder created: %s\n", path)
+
 	return nil
 }
 
@@ -38,6 +38,20 @@ func DeleteFolder(path string) error {
 	if err != nil {
 		return fmt.Errorf("could not delete folder: %w", err)
 	}
-	fmt.Printf("Folder and its contents deleted: %s\n", path)
+
+	return nil
+}
+
+func WriteFile(path string, content string) error {
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open or create file for writing: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(content + "\n"); err != nil {
+		return fmt.Errorf("could not write to file: %w", err)
+	}
+
 	return nil
 }

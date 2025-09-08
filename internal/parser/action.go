@@ -1,10 +1,16 @@
 package parser
 
-type Payload struct {
-	Value string `json:"value"`
+type Action struct {
+	ID      string         `json:"id"`
+	Action  string         `json:"action"`
+	Payload map[string]any `json:"payload"`
 }
 
-type Action struct {
-	Action  string  `json:"action"`
-	Payload Payload `json:"payload"`
+type ExecutionStage struct {
+	Stage   int      `json:"stage"`
+	Actions []Action `json:"actions"`
+}
+
+type ExecutionPlan struct {
+	Plan []ExecutionStage `json:"plan"`
 }

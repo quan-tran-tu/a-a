@@ -1,92 +1,57 @@
 package parser
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"strings"
 
-	"github.com/joho/godotenv"
-	"google.golang.org/genai"
+	"a-a/internal/llm_client"
 )
 
-func buildPrompt(inputText string) string {
+var registry *ActionRegistry
+
+func buildPlanPrompt(userGoal string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an intelligent assistant's intent parser. Your task is to analyze the user's text and respond ONLY with a single, minified JSON object in the format: {\"action\": \"string\", \"payload\": {\"value\": \"string\"}}. Do not include any other text, explanations, or markdown formatting.\n\n")
-
-	sb.WriteString("AVAILABLE ACTIONS:\n")
-	sb.WriteString("- `system.create_file`: Creates a new empty file. Payload value is the file path.\n")
-	sb.WriteString("- `system.delete_file`: Deletes a file. Payload value is the file path.\n")
-	sb.WriteString("- `system.create_folder`: Creates a directory. Payload value is the folder path.\n")
-	sb.WriteString("- `system.delete_folder`: Deletes a directory and its contents. Payload value is the folder path.\n")
-	sb.WriteString("- `web.search`: Searches the web. Payload value is the search query.\n")
-	sb.WriteString("- `apps.open`: Opens an application. Payload value is the application name.\n")
-	sb.WriteString("- `intent.unknown`: Use if the intent is unclear or not supported. Payload value is the original user text.\n\n")
-
-	sb.WriteString("EXAMPLES:\n")
-	sb.WriteString("User: \"make a new file called my_document.txt\"\n")
-	sb.WriteString("Assistant: {\"action\":\"system.create_file\",\"payload\":{\"value\":\"my_document.txt\"}}\n")
-	sb.WriteString("User: \"search the web for the go cobra library\"\n")
-	sb.WriteString("Assistant: {\"action\":\"web.search\",\"payload\":{\"value\":\"go cobra library\"}}\n")
-	sb.WriteString("User: \"open vscode for me\"\n")
-	sb.WriteString("Assistant: {\"action\":\"apps.open\",\"payload\":{\"value\":\"vscode\"}}\n")
-	sb.WriteString("User: \"what is the weather like?\"\n")
-	sb.WriteString("Assistant: {\"action\":\"intent.unknown\",\"payload\":{\"value\":\"what is the weather like?\"}}\n\n")
-
-	sb.WriteString("Now, parse the following user text:\n")
-	sb.WriteString(fmt.Sprintf("User: \"%s\"\n", inputText))
+	sb.WriteString("You are an expert AI workflow planner. Your task is to convert a user's goal into a structured JSON execution plan. Respond ONLY with the JSON plan. Do not include any other text, explanations, or markdown formatting.\n\n")
+	sb.WriteString("The plan consists of stages. All actions in one stage run in parallel. The plan proceeds to the next stage only after the current one is complete. Action outputs can be referenced in later stages using the '@results.action_id.output_key' syntax.\n\n")
+	sb.WriteString(registry.GeneratePromptPart() + "\n")
+	sb.WriteString("EXAMPLE:\n")
+	sb.WriteString("User Goal: \"Summarize the homepages of the NY Times and Reuters and save the summary to a file named 'news.md'\"\n")
+	sb.WriteString("Assistant: {\"plan\":[{\"stage\":1,\"actions\":[{\"id\":\"fetch_nytimes\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.nytimes.com\"}},{\"id\":\"fetch_reuters\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.reuters.com\"}}]},{\"stage\":2,\"actions\":[{\"id\":\"summarize_news\",\"action\":\"llm.generate_text\",\"payload\":{\"prompt\":\"Summarize these two articles:\\n\\nArticle 1: @results.fetch_nytimes.content\\n\\nArticle 2: @results.fetch_reuters.content\"}}]},{\"stage\":3,\"actions\":[{\"id\":\"save_summary\",\"action\":\"system.write_file\",\"payload\":{\"path\":\"news.md\",\"content\":\"@results.summarize_news.generated_text\"}}]}]}\n\n")
+	sb.WriteString("Now, generate a plan for the following user goal:\n")
+	sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", userGoal))
 	sb.WriteString("Assistant: ")
 
 	return sb.String()
 }
 
-func ParseIntent(inputText string) (*Action, error) {
-	_ = godotenv.Load()
+func GeneratePlan(userGoal string) (*ExecutionPlan, error) {
+	prompt := buildPlanPrompt(userGoal)
 
-	ctx := context.Background()
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY enviroment variable is not set")
-	}
-
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
+	generatedText, err := llm_client.Generate(prompt, "gemini-2.0-flash")
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("failed to generate plan from LLM: %w", err)
 	}
-	prompt := buildPrompt(inputText)
-	result, err := client.Models.GenerateContent(ctx, "gemini-2.0-flash", genai.Text(prompt), nil)
+
+	cleanJson := strings.TrimPrefix(generatedText, "```json")
+	cleanJson = strings.TrimPrefix(cleanJson, "```")
+	cleanJson = strings.TrimSuffix(cleanJson, "```")
+	cleanJson = strings.TrimSpace(cleanJson)
+
+	var plan ExecutionPlan
+	err = json.Unmarshal([]byte(cleanJson), &plan)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("error parsing generated plan JSON: %v\nRaw Response: %s", err, generatedText)
 	}
 
-	// Extract the text content from the response
-	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("no content generated by Gemini")
+	for _, stage := range plan.Plan {
+		for _, action := range stage.Actions {
+			if err := registry.ValidateAction(&action); err != nil {
+				return nil, fmt.Errorf("generated plan contains an invalid action: %w", err)
+			}
+		}
 	}
 
-	// Get the first text part from the first candidate
-	part := result.Candidates[0].Content.Parts[0]
-	if part.Text == "" {
-		return nil, fmt.Errorf("generated content has no text")
-	}
-
-	generatedText := part.Text
-
-	// Clean up the response (remove any extra whitespace/newlines)
-	generatedText = strings.TrimSpace(generatedText)
-
-	// Parse the JSON response into Action struct
-	var action Action
-	err = json.Unmarshal([]byte(generatedText), &action)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing JSON response: %v\nRaw Response: %s", err, generatedText)
-	}
-
-	return &action, nil
+	return &plan, nil
 }

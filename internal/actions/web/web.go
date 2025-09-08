@@ -7,7 +7,6 @@ import (
 	"runtime"
 )
 
-// Search opens the default web browser with an encoded search query.
 func Search(query string) error {
 	searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
 	var cmd *exec.Cmd
