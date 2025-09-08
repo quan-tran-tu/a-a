@@ -8,19 +8,6 @@ import (
 	"strings"
 )
 
-type ActionDefinition struct {
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	PayloadSchema struct {
-		Required []string `json:"required"`
-	} `json:"payload_schema"`
-}
-
-type ActionRegistry struct {
-	Actions    []ActionDefinition
-	actionsMap map[string]ActionDefinition
-}
-
 // Reads the action definitions from a JSON file
 func LoadActionRegistry(filePath string) (*ActionRegistry, error) {
 	file, err := os.ReadFile(filePath)

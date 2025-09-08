@@ -14,3 +14,16 @@ type ExecutionStage struct {
 type ExecutionPlan struct {
 	Plan []ExecutionStage `json:"plan"`
 }
+
+type ActionDefinition struct {
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	PayloadSchema struct {
+		Required []string `json:"required"`
+	} `json:"payload_schema"`
+}
+
+type ActionRegistry struct {
+	Actions    []ActionDefinition
+	actionsMap map[string]ActionDefinition
+}
