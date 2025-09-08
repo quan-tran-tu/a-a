@@ -11,6 +11,6 @@ func GenerateContentGemini(prompt string, model_name string) (map[string]any, er
 	}
 
 	output := make(map[string]any)
-	output["generated_text"] = generatedText
+	output["generated_content"] = generatedText
 	return output, nil
 }
