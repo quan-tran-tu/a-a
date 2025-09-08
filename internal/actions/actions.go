@@ -150,7 +150,7 @@ func handleToolsAction(operation string, payload map[string]any) (map[string]any
 
 func handleLlmAction(operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
-	case "generate_text":
+	case "generate_content":
 		prompt, err := getStringPayload(payload, "prompt")
 		if err != nil {
 			return nil, err

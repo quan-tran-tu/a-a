@@ -136,20 +136,29 @@ var rootCmd = &cobra.Command{
 			}
 
 			// Give immediate feedback
-			fmt.Println("ok")
+			fmt.Println("Generating plan...")
 
-			// Launch a new goroutine to handle the blocking API call and dispatching.
-			go func(goal string) {
-				plan, err := parser.GeneratePlan(goal)
-				if err != nil {
-					fmt.Printf("\nError generating plan: %v\n> ", err)
-					return
+			plan, err := parser.GeneratePlan(inputText)
+			if err != nil {
+				fmt.Printf("Error generating plan: %v\n", err)
+				continue
+			}
+
+			PrettyPrintPlan(plan)
+
+			for {
+				answer := listener.GetConfirmation("Do you want to execute this plan? [y/n] > ")
+				if answer == "y" || answer == "yes" {
+					fmt.Println("Plan approved. Executing now...")
+					normalPriorityQueue <- plan
+					break
+				} else if answer == "n" || answer == "no" {
+					fmt.Println("Plan cancelled.")
+					break
+				} else {
+					fmt.Println("Invalid input. Please enter 'y' or 'n'.")
 				}
-
-				// Dispatch the complete plan to the worker for execution.
-				// (For now, all go to normal priority).
-				normalPriorityQueue <- plan
-			}(inputText)
+			}
 		}
 	},
 }
