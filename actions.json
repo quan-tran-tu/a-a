@@ -1,6 +1,18 @@
 {
   "actions": [
     {
+      "name": "system.read_file",
+      "description": "Reads the entire content of a file.",
+      "payload_schema": { "required": ["path"] },
+      "output_schema": { "keys": ["content"] }
+    },
+    {
+      "name": "system.list_directory",
+      "description": "Lists the files and subdirectories in a given path.",
+      "payload_schema": { "required": ["path"] },
+      "output_schema": { "keys": ["entries"] }
+    },
+    {
       "name": "system.create_file",
       "description": "Creates a new empty file.",
       "payload_schema": {
@@ -41,6 +53,12 @@
       "payload_schema": {
         "required": ["query"]
       }
+    },
+    {
+      "name": "web.fetch_page_content",
+      "description": "Fetches the raw text content of a web page from a URL.",
+      "payload_schema": { "required": ["url"] },
+      "output_schema": { "keys": ["content"] }
     },
     {
       "name": "apps.open",

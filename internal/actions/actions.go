@@ -24,7 +24,7 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 
 	switch category {
 	case "system":
-		return handleSystemAction(ctx, operation, action.Payload)
+		return handleSystemAction(operation, action.Payload)
 	case "web":
 		return handleWebAction(ctx, operation, action.Payload)
 	case "apps":
@@ -76,7 +76,7 @@ func getStringSlicePayload(payload map[string]any, key string) ([]string, error)
 	return slice, nil
 }
 
-func handleSystemAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
+func handleSystemAction(operation string, payload map[string]any) (map[string]any, error) {
 	path, err := getStringPayload(payload, "path")
 	if err != nil {
 		if _, ok := payload["content"]; !ok && operation != "write_file" {
@@ -99,6 +99,12 @@ func handleSystemAction(ctx context.Context, operation string, payload map[strin
 			return nil, err
 		}
 		return nil, system.WriteFile(path, content)
+	case "read_file":
+		path, _ := getStringPayload(payload, "path")
+		return system.ReadFile(path)
+	case "list_directory":
+		path, _ := getStringPayload(payload, "path")
+		return system.ListDirectory(path)
 	default:
 		return nil, fmt.Errorf("unknown system operation: %s", operation)
 	}
@@ -112,6 +118,12 @@ func handleWebAction(ctx context.Context, operation string, payload map[string]a
 			return nil, err
 		}
 		return nil, web.Search(ctx, query)
+	case "fetch_page_content":
+		url, err := getStringPayload(payload, "url")
+		if err != nil {
+			return nil, err
+		}
+		return web.FetchPageContent(ctx, url)
 	default:
 		return nil, fmt.Errorf("unknown web operation: %s", operation)
 	}
