@@ -27,3 +27,8 @@ type ActionRegistry struct {
 	Actions    []ActionDefinition
 	actionsMap map[string]ActionDefinition
 }
+
+type ConversationTurn struct {
+	UserGoal      string `json:"user_goal"`
+	AssistantPlan string `json:"assistant_plan"`
+}

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -22,6 +23,7 @@ var highPriorityQueue = make(chan *parser.ExecutionPlan, 100)
 var normalPriorityQueue = make(chan *parser.ExecutionPlan, 100)
 
 const actionTimeout = 30 * time.Second
+const maxHistory = 3
 
 func worker() {
 	for {
@@ -152,6 +154,8 @@ var rootCmd = &cobra.Command{
 
 		fmt.Println("Hello! How can I help you today? (type 'exit' or press Ctrl+C to quit)")
 
+		var conversationHistory []parser.ConversationTurn
+
 		for {
 			inputText := listener.GetInput()
 
@@ -166,10 +170,26 @@ var rootCmd = &cobra.Command{
 			// Give immediate feedback
 			fmt.Println("Generating plan...")
 
-			plan, err := parser.GeneratePlan(inputText)
+			plan, err := parser.GeneratePlan(conversationHistory, inputText)
 			if err != nil {
 				fmt.Printf("Error generating plan: %v\n", err)
 				continue
+			}
+
+			planBytes, err := json.Marshal(plan)
+			if err != nil {
+				fmt.Printf("Error serializing plan for history: %v\n", err)
+				continue
+			}
+
+			newTurn := parser.ConversationTurn{
+				UserGoal:      inputText,
+				AssistantPlan: string(planBytes),
+			}
+			conversationHistory = append(conversationHistory, newTurn)
+
+			if len(conversationHistory) > maxHistory {
+				conversationHistory = conversationHistory[1:]
 			}
 
 			PrettyPrintPlan(plan)

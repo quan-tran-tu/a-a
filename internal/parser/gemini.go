@@ -10,10 +10,18 @@ import (
 
 var registry *ActionRegistry
 
-func buildPlanPrompt(userGoal string) string {
+func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	var sb strings.Builder
 
 	sb.WriteString("You are an expert AI workflow planner. Your task is to convert a user's goal into a structured JSON execution plan. Respond ONLY with the JSON plan. Do not include any other text, explanations, or markdown formatting.\n\n")
+	if len(history) > 0 {
+		sb.WriteString("CONVERSATION HISTORY (for context):\n")
+		for _, turn := range history {
+			sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", turn.UserGoal))
+			sb.WriteString(fmt.Sprintf("Previous Assistant Plan: %s\n", turn.AssistantPlan))
+		}
+		sb.WriteString("\n")
+	}
 	sb.WriteString("The plan consists of stages. All actions in one stage run in parallel. The plan proceeds to the next stage only after the current one is complete. Action outputs can be referenced in later stages using the '@results.action_id.output_key' syntax.\n\n")
 	sb.WriteString(registry.GeneratePromptPart() + "\n")
 	sb.WriteString("EXAMPLE:\n")
@@ -26,8 +34,8 @@ func buildPlanPrompt(userGoal string) string {
 	return sb.String()
 }
 
-func GeneratePlan(userGoal string) (*ExecutionPlan, error) {
-	prompt := buildPlanPrompt(userGoal)
+func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
+	prompt := buildPlanPrompt(history, userGoal)
 
 	generatedText, err := llm_client.Generate(prompt, "gemini-2.0-flash")
 	if err != nil {
