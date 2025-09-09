@@ -1,15 +1,18 @@
-package cli
+package display
 
 import (
+	"a-a/internal/parser"
 	"fmt"
 	"strings"
-
-	"a-a/internal/parser"
 )
 
-func PrettyPrintPlan(plan *parser.ExecutionPlan) {
+const maxPayloadValueLength = 100
+
+func FormatPlan(plan *parser.ExecutionPlan) string {
 	var sb strings.Builder
-	sb.WriteString("EXECUTION PLAN:\n")
+	sb.WriteString("Proposed execution plan:\n")
+	sb.WriteString("--------------------------------------------------\n")
+
 	for _, stage := range plan.Plan {
 		sb.WriteString(fmt.Sprintf("Stage %d:\n", stage.Stage))
 		for _, action := range stage.Actions {
@@ -23,14 +26,16 @@ func PrettyPrintPlan(plan *parser.ExecutionPlan) {
 			}
 		}
 	}
-	sb.WriteString("--------------------------------------------------\n")
-
-	fmt.Print(sb.String())
+	sb.WriteString("--------------------------------------------------")
+	return sb.String()
 }
 
 func formatValueForDisplay(value any) string {
 	s := fmt.Sprintf("%v", value)
-	s = strings.ReplaceAll(s, "\n", "\\n") // Keep display on one line
+	s = strings.ReplaceAll(s, "\n", "\\n")
 
+	if len(s) > maxPayloadValueLength {
+		return s[:maxPayloadValueLength] + "..."
+	}
 	return s
 }

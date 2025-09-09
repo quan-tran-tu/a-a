@@ -3,6 +3,7 @@ package main
 import (
 	"a-a/internal/cli"
 	"a-a/internal/llm_client"
+	"a-a/internal/logger"
 	"a-a/internal/parser"
 
 	"log"
@@ -14,6 +15,10 @@ func main() {
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
+	}
+
+	if err := logger.Init("assistant.log"); err != nil {
+		log.Fatalf("Fatal Error: Could not initialize logger: %v", err)
 	}
 
 	if err := llm_client.InitGeminiClient(); err != nil {

@@ -21,6 +21,9 @@ type ActionDefinition struct {
 	PayloadSchema struct {
 		Required []string `json:"required"`
 	} `json:"payload_schema"`
+	OutputSchema struct {
+		Keys []string `json:"keys"`
+	} `json:"output_schema"`
 }
 
 type ActionRegistry struct {
@@ -29,6 +32,7 @@ type ActionRegistry struct {
 }
 
 type ConversationTurn struct {
-	UserGoal      string `json:"user_goal"`
-	AssistantPlan string `json:"assistant_plan"`
+	UserGoal       string `json:"user_goal"`
+	AssistantPlan  string `json:"assistant_plan"`
+	ExecutionError string `json:"execution_error,omitempty"`
 }
