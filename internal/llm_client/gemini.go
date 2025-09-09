@@ -34,7 +34,7 @@ func Generate(prompt string, model string) (string, error) {
 	}
 
 	if model == "" {
-		model = "gemini-2.0-flash" // A sensible default
+		model = "gemini-2.0-flash"
 	}
 
 	ctx := context.Background()
