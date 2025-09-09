@@ -95,9 +95,12 @@ All background activities, including generated plans, action executions, errors,
 The project is organized with a clean, decoupled architecture:
 -   `cmd/`: Main application entry point.
 -   `internal/`:
-    -   `cli/`: Handles user input and displays final results.
-    -   `supervisor/`: The "mission control" that manages the lifecycle of autonomous tasks.
-    -   `parser/`: Responsible for communicating with the LLM to generate plans.
-    -   `executor/`: The engine that runs the stages and actions of a plan.
-    -   `actions/`: The actual implementation of all the tools the assistant can use.
-    -   `logger/`: Centralized file logging.
+    -   `cli/`: Handles the main user input loop, starts background services, and displays final mission results.
+    -   `supervisor/`: The "mission control" that manages the entire lifecycle of autonomous tasks, including the self-correction loop.
+    -   `parser/`: Responsible for building prompts and communicating with the LLM to generate structured execution plans.
+    -   `executor/`: The low-level engine that runs the stages and actions of a single plan with concurrency and error handling.
+    -   `actions/`: The actual implementation of all the tools and capabilities the assistant can use (e.g., file system, web, git).
+    -   `llm_client/`: The low-level client for communicating with the external LLM API (Google Gemini).
+    -   `display/`: A utility for formatting complex data, like execution plans, into human-readable strings for logging and user confirmation.
+    -   `listener/`: A simple, dedicated utility for capturing user input from the command line.
+    -   `logger/`: Centralized file logging setup and configuration.
