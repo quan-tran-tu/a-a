@@ -87,6 +87,9 @@
       "description": "Prompts a large language model to generate content.",
       "payload_schema": {
           "required": ["prompt"]
+      },
+      "output_schema": {
+          "keys": ["generated_content"]
       }
     }
   ]

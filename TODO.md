@@ -1,4 +1,7 @@
 - Write tests
+    - Write mock test for parser.GeneratePlan
+    - Write mock tests for actions (web, system)
+    - Write E2E tests
 - Write doc and comment code
 
 #### Use cases:

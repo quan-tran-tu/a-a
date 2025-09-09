@@ -46,7 +46,11 @@ func (r *ActionRegistry) GeneratePromptPart() string {
 	sb.WriteString("AVAILABLE ACTIONS & PAYLOADS:\n")
 	for _, action := range r.Actions {
 		requiredKeys := strings.Join(action.PayloadSchema.Required, ", ")
-		sb.WriteString(fmt.Sprintf("- `%s`: %s Payload requires keys: `[%s]`.\n", action.Name, action.Description, requiredKeys))
+		sb.WriteString(fmt.Sprintf("- `%s`: %s Payload requires keys: `[%s]`.", action.Name, action.Description, requiredKeys))
+		if len(action.OutputSchema.Keys) > 0 {
+			outputKeys := strings.Join(action.OutputSchema.Keys, ", ")
+			sb.WriteString(fmt.Sprintf(" Returns output with keys: `[%s]`.\n", outputKeys))
+		}
 	}
 	return sb.String()
 }
