@@ -35,7 +35,6 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 		return handleLlmAction(operation, action.Payload)
 	case "intent":
 		if operation == "unknown" {
-			// This action succeeds but produces no output.
 			return nil, nil
 		}
 	}

@@ -1,13 +1,15 @@
 package display
 
 import (
-	"a-a/internal/parser"
 	"fmt"
 	"strings"
+
+	"a-a/internal/parser"
 )
 
 const maxPayloadValueLength = 100
 
+// stdout plan
 func FormatPlan(plan *parser.ExecutionPlan) string {
 	var sb strings.Builder
 	sb.WriteString("Proposed execution plan:\n")
@@ -30,6 +32,7 @@ func FormatPlan(plan *parser.ExecutionPlan) string {
 	return sb.String()
 }
 
+// Limit plan's stdout length
 func formatValueForDisplay(value any) string {
 	s := fmt.Sprintf("%v", value)
 	s = strings.ReplaceAll(s, "\n", "\\n")

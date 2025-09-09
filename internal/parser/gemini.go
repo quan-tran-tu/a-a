@@ -10,6 +10,7 @@ import (
 
 var registry *ActionRegistry
 
+// Main prompt for generating plan of a mission
 func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	var sb strings.Builder
 
@@ -34,6 +35,7 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	return sb.String()
 }
 
+// Generating plan for a mission
 func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
 	prompt := buildPlanPrompt(history, userGoal)
 
@@ -53,6 +55,7 @@ func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, 
 		return nil, fmt.Errorf("error parsing generated plan JSON: %v\nRaw Response: %s", err, generatedText)
 	}
 
+	// Check for invalid action found in LLM response
 	for _, stage := range plan.Plan {
 		for _, action := range stage.Actions {
 			if err := registry.ValidateAction(&action); err != nil {

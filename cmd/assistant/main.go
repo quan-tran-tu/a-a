@@ -1,14 +1,14 @@
 package main
 
 import (
+	"log"
+
+	"github.com/joho/godotenv"
+
 	"a-a/internal/cli"
 	"a-a/internal/llm_client"
 	"a-a/internal/logger"
 	"a-a/internal/parser"
-
-	"log"
-
-	"github.com/joho/godotenv"
 )
 
 func main() {

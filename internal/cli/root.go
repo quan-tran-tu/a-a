@@ -8,18 +8,18 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/spf13/cobra"
+
 	"a-a/internal/display"
 	"a-a/internal/listener"
 	"a-a/internal/parser"
 	"a-a/internal/supervisor"
-
-	"github.com/spf13/cobra"
 )
 
-const maxCliHistory = 3
+const maxCliHistory = 3 // Max conversation saved into LLM context
 
 func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync.Mutex) {
-	for result := range supervisor.ResultChannel {
+	for result := range supervisor.ResultChannel { // Whenever a mission is completely finished
 		mu.Lock()
 
 		newTurn := parser.ConversationTurn{
@@ -30,6 +30,7 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 			newTurn.ExecutionError = result.Error
 		}
 
+		// Append the conversation of the finished mission to LLM context
 		*cliHistory = append(*cliHistory, newTurn)
 		if len(*cliHistory) > maxCliHistory {
 			*cliHistory = (*cliHistory)[1:]
@@ -37,6 +38,7 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 
 		mu.Unlock()
 
+		// stdout
 		if result.Error != "" {
 			fmt.Printf("\n[Mission %s FAILED]\n> ", result.MissionID)
 		} else {
@@ -45,6 +47,7 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 	}
 }
 
+// Trigger confirmation from user when found a risky action in a plan
 func handleConfirmations() {
 	for req := range supervisor.ConfirmationChannel {
 		fmt.Printf("\n\n----------------- USER ACTION REQUIRED -----------------\n")
@@ -77,10 +80,11 @@ var rootCmd = &cobra.Command{
 		supervisor.StartSupervisor()
 		go handleConfirmations()
 
-		var cliConversationHistory []parser.ConversationTurn
-		var historyMutex sync.Mutex
+		var cliConversationHistory []parser.ConversationTurn // LLM context
+		var historyMutex sync.Mutex                          // Mutex for LLM context
 		go updateCliHistoryFromResults(&cliConversationHistory, &historyMutex)
 
+		// Gracefully shut down
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 		go func() {
@@ -102,6 +106,7 @@ var rootCmd = &cobra.Command{
 				continue
 			}
 
+			// Safely copy LLM context
 			historyMutex.Lock()
 			missionHistory := make([]parser.ConversationTurn, len(cliConversationHistory))
 			copy(missionHistory, cliConversationHistory)

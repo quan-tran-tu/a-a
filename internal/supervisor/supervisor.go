@@ -1,18 +1,19 @@
 package supervisor
 
 import (
-	"a-a/internal/display"
-	"a-a/internal/executor"
-	"a-a/internal/logger"
-	"a-a/internal/parser"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+
+	"a-a/internal/display"
+	"a-a/internal/executor"
+	"a-a/internal/logger"
+	"a-a/internal/parser"
 )
 
-var missionQueue = make(chan *Mission, 100)
+var missionQueue = make(chan *Mission, 100) // Main work queue
 
 func StartSupervisor() {
 	go func() {
@@ -119,6 +120,7 @@ func runMission(m *Mission) {
 	ResultChannel <- result
 }
 
+// A list of risky actions that requires user confirmation
 func isPlanRisky(plan *parser.ExecutionPlan) bool {
 	for _, stage := range plan.Plan {
 		for _, action := range stage.Actions {

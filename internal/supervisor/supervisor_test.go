@@ -1,8 +1,9 @@
 package supervisor
 
 import (
-	"a-a/internal/parser"
 	"testing"
+
+	"a-a/internal/parser"
 )
 
 func TestIsPlanRisky(t *testing.T) {

@@ -1,9 +1,10 @@
 package display
 
 import (
-	"a-a/internal/parser"
 	"strings"
 	"testing"
+
+	"a-a/internal/parser"
 )
 
 func TestFormatPlan(t *testing.T) {
