@@ -36,3 +36,7 @@ type ConversationTurn struct {
 	AssistantPlan  string `json:"assistant_plan"`
 	ExecutionError string `json:"execution_error,omitempty"`
 }
+
+type GoalIntent struct {
+	RequiresConfirmation bool `json:"requires_confirmation"`
+}

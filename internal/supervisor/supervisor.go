@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -44,6 +45,16 @@ func runMission(m *Mission) {
 
 	logger.Log.Printf("Starting new mission '%s' (ID: %s)", m.OriginalGoal, m.ID)
 
+	_, cancelIntent := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelIntent()
+	goalIntent, err := parser.AnalyzeGoalIntent(m.OriginalGoal)
+	if err != nil {
+		logger.Log.Printf("Could not determine user intent for mission '%s': %v", m.OriginalGoal, err)
+		finalError = err
+		goto reportResult // Using goto for a clean exit from a nested structure
+	}
+	logger.Log.Printf("Intent analysis for mission '%s': requires_confirmation=%v", m.OriginalGoal, goalIntent.RequiresConfirmation)
+
 	for m.CurrentAttempt < m.MaxRetries {
 		m.CurrentAttempt++
 		logger.Log.Printf("Mission '%s' - Attempt %d/%d", m.OriginalGoal, m.CurrentAttempt, m.MaxRetries)
@@ -61,8 +72,8 @@ func runMission(m *Mission) {
 		planString := display.FormatPlan(plan)
 		logger.Log.Printf("Mission '%s' generated plan:\n%s", m.OriginalGoal, planString)
 
-		if isPlanRisky(plan) {
-			logger.Log.Printf("Mission '%s' requires confirmation for a risky plan.", m.OriginalGoal)
+		if isPlanRisky(plan) || goalIntent.RequiresConfirmation {
+			logger.Log.Printf("Mission '%s' requires confirmation for a plan.", m.OriginalGoal)
 
 			responseChan := make(chan bool)
 			ConfirmationChannel <- ConfirmationRequest{
@@ -109,6 +120,7 @@ func runMission(m *Mission) {
 		time.Sleep(1 * time.Second)
 	}
 
+reportResult:
 	result := MissionResult{
 		MissionID:    m.ID,
 		OriginalGoal: m.OriginalGoal,

@@ -35,6 +35,24 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	return sb.String()
 }
 
+func buildIntentPrompt(userGoal string) string {
+	var sb strings.Builder
+	sb.WriteString("You are an expert user intent analyzer. Your task is to analyze the user's goal and determine their meta-intents. Respond ONLY with a JSON object. Do not include any other text or markdown formatting.\n\n")
+	sb.WriteString("The user's goal is: \"")
+	sb.WriteString(userGoal)
+	sb.WriteString("\"\n\n")
+	sb.WriteString("Analyze the goal for the following intents:\n")
+	sb.WriteString("- `requires_confirmation`: Set to `true` if the user explicitly asks to see, review, confirm, or approve the plan before execution. Otherwise, set to `false`.\n\n")
+	sb.WriteString("EXAMPLE 1:\n")
+	sb.WriteString("User Goal: \"create a file and show me the plan\"\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": true}\n\n")
+	sb.WriteString("EXAMPLE 2:\n")
+	sb.WriteString("User Goal: \"Summarize the top headlines on CNN\"\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": false}\n\n")
+	sb.WriteString("Assistant JSON response: ")
+	return sb.String()
+}
+
 // Generating plan for a mission
 func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
 	prompt := buildPlanPrompt(history, userGoal)
@@ -65,4 +83,26 @@ func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, 
 	}
 
 	return &plan, nil
+}
+
+func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
+	prompt := buildIntentPrompt(userGoal)
+
+	generatedText, err := llm_client.Generate(prompt, "gemini-2.0-flash")
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate intent from LLM: %w", err)
+	}
+
+	cleanJson := strings.TrimPrefix(generatedText, "```json")
+	cleanJson = strings.TrimPrefix(cleanJson, "```")
+	cleanJson = strings.TrimSuffix(cleanJson, "```")
+	cleanJson = strings.TrimSpace(cleanJson)
+
+	var intent GoalIntent
+	err = json.Unmarshal([]byte(cleanJson), &intent)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing generated intent JSON: %v\nRaw Response: %s", err, generatedText)
+	}
+
+	return &intent, nil
 }

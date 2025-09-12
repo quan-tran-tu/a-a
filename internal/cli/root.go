@@ -16,7 +16,8 @@ import (
 	"a-a/internal/supervisor"
 )
 
-const maxCliHistory = 3 // Max conversation saved into LLM context
+const maxCliHistory = 3                // Max conversation saved into LLM context
+var stdinLock = make(chan struct{}, 1) // Lock for stdin access
 
 func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync.Mutex) {
 	for result := range supervisor.ResultChannel { // Whenever a mission is completely finished
@@ -50,8 +51,9 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 // Trigger confirmation from user when found a risky action in a plan
 func handleConfirmations() {
 	for req := range supervisor.ConfirmationChannel {
+		<-stdinLock
 		fmt.Printf("\n\n----------------- USER ACTION REQUIRED -----------------\n")
-		fmt.Printf("Mission '%s' requires your approval for a risky plan.\n", req.MissionID)
+		fmt.Printf("Mission '%s' requires your approval for a plan.\n", req.MissionID)
 		fmt.Println(display.FormatPlan(req.Plan))
 
 		var approved bool
@@ -69,6 +71,7 @@ func handleConfirmations() {
 		}
 		fmt.Printf("------------------------------------------------------\n> ")
 		req.Response <- approved
+		stdinLock <- struct{}{}
 	}
 }
 
@@ -83,6 +86,7 @@ var rootCmd = &cobra.Command{
 		var cliConversationHistory []parser.ConversationTurn // LLM context
 		var historyMutex sync.Mutex                          // Mutex for LLM context
 		go updateCliHistoryFromResults(&cliConversationHistory, &historyMutex)
+		stdinLock <- struct{}{}
 
 		// Gracefully shut down
 		c := make(chan os.Signal, 1)
@@ -96,6 +100,7 @@ var rootCmd = &cobra.Command{
 		fmt.Println("Hello! How can I help you today? (type 'exit' or press Ctrl+C to quit)")
 
 		for {
+			<-stdinLock
 			inputText := listener.GetInput()
 
 			if strings.TrimSpace(strings.ToLower(inputText)) == "exit" {
@@ -105,6 +110,7 @@ var rootCmd = &cobra.Command{
 			if strings.TrimSpace(inputText) == "" {
 				continue
 			}
+			stdinLock <- struct{}{}
 
 			// Safely copy LLM context
 			historyMutex.Lock()
