@@ -3,6 +3,8 @@
     - Write mock tests for actions (web, system)
     - Write E2E tests
 
+- Race condition of stdin still need to be fixed, user need to input another query to print out plan, even though the plan is in log already
+
 #### Use cases:
 1. Daily news briefing: \
 Fetch today news from a few news site (CNN, BBC,...) and summarize into a daily report
