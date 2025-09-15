@@ -9,8 +9,17 @@ import (
 
 const maxPayloadValueLength = 100
 
-// stdout plan
+// stdout plan (truncated)
 func FormatPlan(plan *parser.ExecutionPlan) string {
+	return formatPlanInternal(plan, maxPayloadValueLength)
+}
+
+// full plan (no truncation) — used for logs
+func FormatPlanFull(plan *parser.ExecutionPlan) string {
+	return formatPlanInternal(plan, -1) // -1 => no limit
+}
+
+func formatPlanInternal(plan *parser.ExecutionPlan, limit int) string {
 	var sb strings.Builder
 	sb.WriteString("Proposed execution plan:\n")
 	sb.WriteString("--------------------------------------------------\n")
@@ -22,7 +31,7 @@ func FormatPlan(plan *parser.ExecutionPlan) string {
 			if len(action.Payload) > 0 {
 				sb.WriteString("    Payload:\n")
 				for key, val := range action.Payload {
-					displayValue := formatValueForDisplay(val)
+					displayValue := formatValueForDisplay(val, limit)
 					sb.WriteString(fmt.Sprintf("      %s: %s\n", key, displayValue))
 				}
 			}
@@ -32,13 +41,12 @@ func FormatPlan(plan *parser.ExecutionPlan) string {
 	return sb.String()
 }
 
-// Limit plan's stdout length
-func formatValueForDisplay(value any) string {
+// Limit plan's stdout length (limit < 0 means no limit)
+func formatValueForDisplay(value any, limit int) string {
 	s := fmt.Sprintf("%v", value)
 	s = strings.ReplaceAll(s, "\n", "\\n")
-
-	if len(s) > maxPayloadValueLength {
-		return s[:maxPayloadValueLength] + "..."
+	if limit >= 0 && len(s) > limit {
+		return s[:limit] + "..."
 	}
 	return s
 }

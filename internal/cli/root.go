@@ -14,6 +14,7 @@ import (
 
 	"a-a/internal/display"
 	"a-a/internal/listener"
+	"a-a/internal/logger"
 	"a-a/internal/parser"
 	"a-a/internal/planner"
 	"a-a/internal/supervisor"
@@ -98,6 +99,10 @@ var rootCmd = &cobra.Command{
 				listener.AsyncPrintln(fmt.Sprintf("[Plan generation FAILED] %v", err))
 				continue
 			}
+
+			// Log full plan
+			logger.Log.Printf("Plan %s for goal %q (FULL):\n%s",
+				planID, inputText, display.FormatPlanFull(plan))
 
 			// Log/preview plan for user if confirmation is needed or if risky
 			needsConfirm := intent.RequiresConfirmation || supervisor.IsPlanRisky(plan)
