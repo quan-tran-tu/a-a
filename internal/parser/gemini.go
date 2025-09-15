@@ -25,6 +25,16 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	}
 	sb.WriteString("The plan consists of stages. All actions in one stage run in parallel. The plan proceeds to the next stage only after the current one is complete. Action outputs can be referenced in later stages using the '@results.action_id.output_key' syntax.\n\n")
 	sb.WriteString(registry.GeneratePromptPart() + "\n")
+
+	sb.WriteString("\nHARD RULES:\n")
+	sb.WriteString("- The LLM must NOT invent or guess URLs. Do not 'generate' URL lists.\n")
+	sb.WriteString("- Discover pagination and detail links ONLY from the provided HTML using html.* actions (e.g., `html.links`).\n")
+	sb.WriteString("- All network I/O (fetching pages) must use `web.request` or `web.batch_request`.\n")
+	sb.WriteString("- Before passing URLs to actions that expect a list of strings (e.g., batch fetch), extract strings with `list.pluck` (field=\"url\") from link objects.\n")
+	sb.WriteString("- Use `url.normalize` and `list.unique` before batch fetches.\n")
+	sb.WriteString("- Use `llm.extract_structured` ONLY to map provided HTML/text to a strict schema. If a field is missing, output null/empty; never invent.\n")
+	sb.WriteString("- Write files with `system.write_file_atomic`.\n\n")
+
 	sb.WriteString("EXAMPLE:\n")
 	sb.WriteString("User Goal: \"Summarize the homepages of the NY Times and Reuters and save the summary to a file named 'news.md'\"\n")
 	sb.WriteString("Assistant: {\"plan\":[{\"stage\":1,\"actions\":[{\"id\":\"fetch_nytimes\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.nytimes.com\"}},{\"id\":\"fetch_reuters\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.reuters.com\"}}]},{\"stage\":2,\"actions\":[{\"id\":\"summarize_news\",\"action\":\"llm.generate_content\",\"payload\":{\"prompt\":\"Summarize these two articles:\\n\\nArticle 1: @results.fetch_nytimes.content\\n\\nArticle 2: @results.fetch_reuters.content\"}}]},{\"stage\":3,\"actions\":[{\"id\":\"save_summary\",\"action\":\"system.write_file\",\"payload\":{\"path\":\"news.md\",\"content\":\"@results.summarize_news.generated_content\"}}]}]}\n\n")

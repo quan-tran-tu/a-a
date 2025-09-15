@@ -92,7 +92,7 @@ var rootCmd = &cobra.Command{
 			historyMutex.Unlock()
 
 			planID := uuid.New().String()[:8]
-			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan id: %s ...", planID))
+			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
 			plan, intent, _, err := planner.BuildWithID(missionHistory, inputText, planID)
 			if err != nil {

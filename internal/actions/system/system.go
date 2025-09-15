@@ -3,6 +3,7 @@ package system
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func CreateFile(path string) error {
@@ -74,4 +75,30 @@ func ListDirectory(path string) (map[string]any, error) {
 		entryNames = append(entryNames, e.Name())
 	}
 	return map[string]any{"entries": entryNames}, nil
+}
+
+func WriteFileAtomic(path string, content string) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("atomic: create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("atomic: write: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("atomic: sync: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("atomic: close: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("atomic: rename: %w", err)
+	}
+	return nil
 }
