@@ -3,14 +3,11 @@ module a-a
 go 1.25.1
 
 require (
-	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/chzyer/readline v1.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.1
 	google.golang.org/genai v1.23.0
 )
-
-require github.com/andybalholm/cascadia v1.3.3 // indirect
 
 require (
 	cloud.google.com/go v0.116.0 // indirect

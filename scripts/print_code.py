@@ -4,7 +4,6 @@ Script to collect all Go code files from current directory and subdirectories,
 format them, and write to a single output file.
 """
 
-import os
 import glob
 
 def collect_go_files():
@@ -42,7 +41,6 @@ def format_go_code_collection(output_file="go_code_collection.txt"):
     output_content = []
     
     for i, filepath in enumerate(go_files, 1):
-        # Format: filename_XX:
         output_content.append(f"// File: {filepath}")
         
         # Read file content
