@@ -4,6 +4,7 @@
     - Write E2E tests
 
 - Race condition of stdin still need to be fixed, user need to input another query to print out plan, even though the plan is in log already
+query to test stdin: i want to list information about all teachers listed on 'https://soict.hust.edu.vn/can-bo'. you might need to analyze the html source of the given url because it might have a page navigation pointing to page 2, 3, ... the end result should be the teacher's name, field of research, papers, awards saved to a soict_teacher.json file. give me the plan first
 
 #### Use cases:
 1. Daily news briefing: \
