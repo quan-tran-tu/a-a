@@ -67,7 +67,7 @@ func TestIsPlanRisky(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			isRisky := isPlanRisky(tc.plan)
+			isRisky := IsPlanRisky(tc.plan)
 
 			if isRisky != tc.expectRisky {
 				t.Errorf("Expected risky=%v, but got risky=%v", tc.expectRisky, isRisky)

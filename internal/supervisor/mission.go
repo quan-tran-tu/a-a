@@ -15,12 +15,5 @@ type Mission struct {
 	CurrentAttempt      int
 	MaxRetries          int
 	ConversationHistory []parser.ConversationTurn
+	Plan                *parser.ExecutionPlan
 }
-
-type ConfirmationRequest struct {
-	MissionID string
-	Plan      *parser.ExecutionPlan
-	Response  chan bool
-}
-
-var ConfirmationChannel = make(chan ConfirmationRequest)

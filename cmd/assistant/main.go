@@ -12,9 +12,8 @@ import (
 )
 
 func main() {
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env not found (continuing)")
 	}
 
 	if err := logger.Init("assistant.log"); err != nil {

@@ -3,12 +3,10 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 
-	"a-a/internal/display"
 	"a-a/internal/executor"
 	"a-a/internal/logger"
 	"a-a/internal/parser"
@@ -19,91 +17,61 @@ var missionQueue = make(chan *Mission, 100) // Main work queue
 func StartSupervisor() {
 	go func() {
 		for mission := range missionQueue {
-			fmt.Printf("\n[Supervisor] Starting new mission '%s' (ID: %s)\n> ", mission.OriginalGoal, mission.ID)
+			logger.Log.Printf("[Supervisor] Starting mission '%s' (ID: %s)", mission.OriginalGoal, mission.ID)
 			mission.State = StatusRunning
 			runMission(mission)
 		}
 	}()
 }
 
-func SubmitMission(goal string, history []parser.ConversationTurn) string {
+// Submit only after plan is known & confirmed
+func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.ConversationTurn) string {
+	id := uuid.New().String()[:8]
 	newMission := &Mission{
-		ID:                  uuid.New().String()[:8],
+		ID:                  id,
 		OriginalGoal:        goal,
 		State:               "PENDING",
 		CurrentAttempt:      0,
 		MaxRetries:          3,
 		ConversationHistory: history,
+		Plan:                plan,
 	}
 	missionQueue <- newMission
-	return newMission.ID
+	return id
 }
 
 func runMission(m *Mission) {
 	var finalPlan string
 	var finalError error
 
-	logger.Log.Printf("Starting new mission '%s' (ID: %s)", m.OriginalGoal, m.ID)
+	logger.Log.Printf("Mission '%s' (ID: %s) executing", m.OriginalGoal, m.ID)
 
-	_, cancelIntent := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelIntent()
-	goalIntent, err := parser.AnalyzeGoalIntent(m.OriginalGoal)
-	if err != nil {
-		logger.Log.Printf("Could not determine user intent for mission '%s': %v", m.OriginalGoal, err)
-		finalError = err
-		goto reportResult // Using goto for a clean exit from a nested structure
+	// Save plan string for history/result
+	if m.Plan != nil {
+		if b, err := json.Marshal(m.Plan); err == nil {
+			finalPlan = string(b)
+		}
 	}
-	logger.Log.Printf("Intent analysis for mission '%s': requires_confirmation=%v", m.OriginalGoal, goalIntent.RequiresConfirmation)
 
 	for m.CurrentAttempt < m.MaxRetries {
 		m.CurrentAttempt++
-		logger.Log.Printf("Mission '%s' - Attempt %d/%d", m.OriginalGoal, m.CurrentAttempt, m.MaxRetries)
 
-		plan, err := parser.GeneratePlan(m.ConversationHistory, m.OriginalGoal)
-		if err != nil {
-			logger.Log.Printf("Error generating plan for mission '%s': %v", m.OriginalGoal, err)
-			finalError = err
-			break
-		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = ctx // (reserved)
+		cancel()
 
-		planBytes, _ := json.Marshal(plan)
-		finalPlan = string(planBytes)
-
-		planString := display.FormatPlan(plan)
-		logger.Log.Printf("Mission '%s' generated plan:\n%s", m.OriginalGoal, planString)
-
-		if isPlanRisky(plan) || goalIntent.RequiresConfirmation {
-			logger.Log.Printf("Mission '%s' requires confirmation for a plan.", m.OriginalGoal)
-
-			responseChan := make(chan bool)
-			ConfirmationChannel <- ConfirmationRequest{
-				MissionID: m.ID,
-				Plan:      plan,
-				Response:  responseChan,
-			}
-
-			approved := <-responseChan
-			if !approved {
-				logger.Log.Printf("User REJECTED the plan for mission '%s'. Aborting...", m.OriginalGoal)
-				m.State = StatusFailed
-				finalError = fmt.Errorf("user rejected the plan")
-				break
-			}
-			logger.Log.Printf("User APPROVED the plan for mission '%s'. Executing... ", m.OriginalGoal)
-		} else {
-			logger.Log.Printf("Auto-approving plan for mission '%s'. Executing now...", m.OriginalGoal)
-		}
-
-		execErr := executor.ExecutePlan(plan)
+		execErr := executor.ExecutePlan(m.Plan)
 		finalError = execErr
 
 		if execErr == nil {
-			logger.Log.Printf("Mission '%s' SUCCEEDED.", m.OriginalGoal)
+			logger.Log.Printf("Mission '%s' SUCCEEDED (ID: %s).", m.OriginalGoal, m.ID)
 			m.State = StatusSucceeded
 			break
 		}
 
-		logger.Log.Printf("Mission '%s' FAILED on attempt %d. Error: %v ", m.OriginalGoal, m.CurrentAttempt, execErr)
+		logger.Log.Printf("Mission '%s' FAILED on attempt %d/%d (ID: %s): %v",
+			m.OriginalGoal, m.CurrentAttempt, m.MaxRetries, m.ID, execErr)
+
 		failureTurn := parser.ConversationTurn{
 			UserGoal:       m.OriginalGoal,
 			AssistantPlan:  finalPlan,
@@ -116,11 +84,9 @@ func runMission(m *Mission) {
 			break
 		}
 
-		logger.Log.Printf("Attempting self-correction for mission '%s'... ", m.OriginalGoal)
-		time.Sleep(1 * time.Second)
+		time.Sleep(1 * time.Second) // naive backoff
 	}
 
-reportResult:
 	result := MissionResult{
 		MissionID:    m.ID,
 		OriginalGoal: m.OriginalGoal,
@@ -133,7 +99,7 @@ reportResult:
 }
 
 // A list of risky actions that requires user confirmation
-func isPlanRisky(plan *parser.ExecutionPlan) bool {
+func IsPlanRisky(plan *parser.ExecutionPlan) bool {
 	for _, stage := range plan.Plan {
 		for _, action := range stage.Actions {
 			if action.Action == "system.execute_shell" || action.Action == "system.delete_folder" {
