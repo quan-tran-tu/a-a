@@ -202,8 +202,8 @@ Notes:
 
 ## Roadmap (Near-term)
 
-- **Extend actions:** Web
-- **Multi-plan:** Some goals can generate plans, where later plan depends on the output of the previous one
+- **Extend actions:** Web.
+- **Multi-plan:** Some goals can require multiple plans, where later plan depends on the output of the previous one.
 
 
 ---
