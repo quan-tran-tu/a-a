@@ -67,20 +67,15 @@ func buildIntentPrompt(userGoal string) string {
 func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
 	prompt := buildPlanPrompt(history, userGoal)
 
-	generatedText, err := llm_client.Generate(prompt, "gemini-2.0-flash")
+	cleanJson, err := llm_client.GenerateJSON(prompt, "gemini-2.0-flash", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate plan from LLM: %w", err)
 	}
 
-	cleanJson := strings.TrimPrefix(generatedText, "```json")
-	cleanJson = strings.TrimPrefix(cleanJson, "```")
-	cleanJson = strings.TrimSuffix(cleanJson, "```")
-	cleanJson = strings.TrimSpace(cleanJson)
-
 	var plan ExecutionPlan
 	err = json.Unmarshal([]byte(cleanJson), &plan)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing generated plan JSON: %v\nRaw Response: %s", err, generatedText)
+		return nil, fmt.Errorf("error parsing generated plan JSON: %v\nRaw Response: %s", err, cleanJson)
 	}
 
 	// Check for invalid action found in LLM response
@@ -98,20 +93,15 @@ func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, 
 func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
 	prompt := buildIntentPrompt(userGoal)
 
-	generatedText, err := llm_client.Generate(prompt, "gemini-2.0-flash")
+	cleanJson, err := llm_client.GenerateJSON(prompt, "gemini-2.0-flash", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate intent from LLM: %w", err)
 	}
 
-	cleanJson := strings.TrimPrefix(generatedText, "```json")
-	cleanJson = strings.TrimPrefix(cleanJson, "```")
-	cleanJson = strings.TrimSuffix(cleanJson, "```")
-	cleanJson = strings.TrimSpace(cleanJson)
-
 	var intent GoalIntent
 	err = json.Unmarshal([]byte(cleanJson), &intent)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing generated intent JSON: %v\nRaw Response: %s", err, generatedText)
+		return nil, fmt.Errorf("error parsing generated intent JSON: %v\nRaw Response: %s", err, cleanJson)
 	}
 
 	return &intent, nil
