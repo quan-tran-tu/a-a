@@ -45,21 +45,28 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	return sb.String()
 }
 
+// Prompt for first hand analyzing user intent
 func buildIntentPrompt(userGoal string) string {
 	var sb strings.Builder
-	sb.WriteString("You are an expert user intent analyzer. Your task is to analyze the user's goal and determine their meta-intents. Respond ONLY with a JSON object. Do not include any other text or markdown formatting.\n\n")
-	sb.WriteString("The user's goal is: \"")
+	sb.WriteString("You are an expert user intent analyzer. Respond ONLY with this JSON (no extra text):\n")
+	sb.WriteString("{\"requires_confirmation\": <bool>, \"run_manual_plans\": <bool>, \"manual_plans_path\": \"<string or empty>\", \"manual_plan_names\": [<zero or more strings in order>]}\n\n")
+
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- requires_confirmation: true ONLY if the user asks to see/review/confirm/approve/preview before execution OR uses verbs like 'show', 'list', 'preview'.\n")
+	sb.WriteString("- run_manual_plans: true if the user asks to execute (or show/preview) plans/missions from a local .json file.\n")
+	sb.WriteString("- manual_plans_path: extract the local .json path verbatim (quoted or unquoted). If none, use empty string.\n")
+	sb.WriteString("- manual_plan_names: if the user names specific missions, return them in order; otherwise an empty array. If empty and run_manual_plans is true, default behavior is to run ALL missions in the file.\n")
+	sb.WriteString("- Only consider local files ending with .json. Ignore URLs.\n\n")
+
+	sb.WriteString("Examples:\n")
+	sb.WriteString("User: \"show me the plans from tests/test_plans.json\"\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": true, \"run_manual_plans\": true, \"manual_plans_path\": \"tests/test_plans.json\", \"manual_plan_names\": []}\n\n")
+	sb.WriteString("User: \"execute the plans 'Create file', 'Import Data' in test.json\"\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": false, \"run_manual_plans\": true, \"manual_plans_path\": \"test.json\", \"manual_plan_names\": [\"Create file\", \"Import Data\"]}\n\n")
+
+	sb.WriteString("User Goal: \"")
 	sb.WriteString(userGoal)
-	sb.WriteString("\"\n\n")
-	sb.WriteString("Analyze the goal for the following intents:\n")
-	sb.WriteString("- `requires_confirmation`: Set to `true` if the user explicitly asks to see, review, confirm, or approve the plan before execution. Otherwise, set to `false`.\n\n")
-	sb.WriteString("EXAMPLE 1:\n")
-	sb.WriteString("User Goal: \"create a file and show me the plan\"\n")
-	sb.WriteString("Assistant: {\"requires_confirmation\": true}\n\n")
-	sb.WriteString("EXAMPLE 2:\n")
-	sb.WriteString("User Goal: \"Summarize the top headlines on CNN\"\n")
-	sb.WriteString("Assistant: {\"requires_confirmation\": false}\n\n")
-	sb.WriteString("Assistant JSON response: ")
+	sb.WriteString("\"\nAssistant JSON response: ")
 	return sb.String()
 }
 
@@ -104,5 +111,8 @@ func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
 		return nil, fmt.Errorf("error parsing generated intent JSON: %v\nRaw Response: %s", err, cleanJson)
 	}
 
+	if !intent.RunManualPlans {
+		intent.ManualPlansPath = ""
+	}
 	return &intent, nil
 }

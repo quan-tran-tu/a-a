@@ -44,6 +44,10 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 		} else {
 			listener.AsyncPrintln(fmt.Sprintf("[Mission %s SUCCEEDED]", result.MissionID))
 		}
+
+		if result.Metrics != nil {
+			listener.AsyncPrintln(display.FormatMissionMetrics(result.Metrics))
+		}
 	}
 }
 
@@ -91,10 +95,71 @@ var rootCmd = &cobra.Command{
 			copy(missionHistory, cliConversationHistory)
 			historyMutex.Unlock()
 
+			intent, err := parser.AnalyzeGoalIntent(inputText)
+			if err != nil {
+				listener.AsyncPrintln(fmt.Sprintf("[Intent analysis FAILED] %v", err))
+				continue
+			}
+
+			if intent.RunManualPlans && strings.TrimSpace(intent.ManualPlansPath) != "" {
+				plans, err := parser.LoadExecutionPlansFromFile(intent.ManualPlansPath)
+				if err != nil {
+					listener.AsyncPrintln(fmt.Sprintf("[Manual] %v", err))
+					continue
+				}
+				if len(plans) == 0 {
+					listener.AsyncPrintln("[Manual] No missions found in file")
+					continue
+				}
+
+				// Filter by names if provided (order preserved)
+				if len(intent.ManualPlanNames) > 0 {
+					selected, missing, err := parser.SelectPlansByNames(plans, intent.ManualPlanNames)
+					if err != nil {
+						listener.AsyncPrintln(fmt.Sprintf("[Manual] %v", err))
+						continue
+					}
+					if len(missing) > 0 {
+						listener.AsyncPrintln(fmt.Sprintf("[Manual] Missing missions: %v", missing))
+					}
+					plans = selected
+				}
+
+				// Show catalog if confirmation requested
+				if intent.RequiresConfirmation {
+					listener.AsyncPrintln(display.FormatPlansCatalog(intent.ManualPlansPath, plans))
+					listener.AsyncPrintln(fmt.Sprintf("About to run %d mission(s) from %s.", len(plans), intent.ManualPlansPath))
+					ans := listener.GetConfirmation("Proceed? [y/n] > ")
+					if ans != "y" && ans != "yes" {
+						listener.AsyncPrintln("[Manual] Cancelled.")
+						continue
+					}
+				}
+
+				// Validate and submit
+				valid := make([]parser.NamedPlan, 0, len(plans))
+				for _, p := range plans {
+					if err := parser.ValidatePlan(p.Plan); err != nil {
+						listener.AsyncPrintln(fmt.Sprintf("[Manual] Invalid mission %q: %v", p.Name, err))
+						continue
+					}
+					valid = append(valid, p)
+				}
+				if len(valid) == 0 {
+					listener.AsyncPrintln("[Manual] No valid missions to run.")
+					continue
+				}
+				for _, p := range valid {
+					missionID := supervisor.SubmitMission(p.Name, p.Plan, missionHistory)
+					listener.AsyncPrintln(fmt.Sprintf("[Manual] Submitted mission %s (%s)", missionID, p.Name))
+				}
+				continue
+			}
+
 			planID := uuid.New().String()[:8]
 			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
-			plan, intent, _, err := planner.BuildWithID(missionHistory, inputText, planID)
+			plan, intent2, _, err := planner.BuildWithID(missionHistory, inputText, planID)
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Plan generation FAILED] %v", err))
 				continue
@@ -105,7 +170,7 @@ var rootCmd = &cobra.Command{
 				planID, inputText, display.FormatPlanFull(plan))
 
 			// Log/preview plan for user if confirmation is needed or if risky
-			needsConfirm := intent.RequiresConfirmation || supervisor.IsPlanRisky(plan)
+			needsConfirm := intent2.RequiresConfirmation || supervisor.IsPlanRisky(plan)
 			if needsConfirm {
 				pretty := display.FormatPlan(plan)
 				listener.AsyncPrintln(pretty)

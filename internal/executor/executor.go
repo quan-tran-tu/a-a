@@ -8,23 +8,36 @@ import (
 	"time"
 
 	"a-a/internal/actions"
+	"a-a/internal/metrics"
 	"a-a/internal/parser"
 )
 
 const actionTimeout = 30 * time.Second
 
-func ExecutePlan(plan *parser.ExecutionPlan) error {
+func ExecutePlan(plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
+	mm := &metrics.MissionMetrics{
+		Start: time.Now(),
+	}
+	defer func() {
+		mm.End = time.Now()
+		mm.DurationMs = mm.End.Sub(mm.Start).Milliseconds()
+	}()
+
 	// Store the output of any actions that returns data, with key is the action's ID
 	results := make(map[string]map[string]any)
 	var resultsMutex sync.Mutex
 
 	for _, stage := range plan.Plan { // Stages are executed sequentially
+		sm := metrics.StageMetrics{
+			Stage: stage.Stage,
+			Start: time.Now(),
+		}
 		// Cancellation signal for the stage (fail fast mechanism)
 		stageCtx, cancelStage := context.WithCancel(context.Background())
 
 		var wg sync.WaitGroup // A counter to notify when all goroutines are finished
 		errChan := make(chan error, len(stage.Actions))
-
+		actMetChan := make(chan metrics.ActionMetrics, len(stage.Actions))
 		for _, action := range stage.Actions { // Every actions in the same stage starts in parallel
 			wg.Add(1)
 			go func(act parser.Action) {
@@ -43,7 +56,22 @@ func ExecutePlan(plan *parser.ExecutionPlan) error {
 
 				act.Payload = resolvePayload(act.Payload, results, &resultsMutex)
 
+				am := metrics.ActionMetrics{
+					ID:     act.ID,
+					Action: act.Action,
+					Start:  time.Now(),
+				}
+
 				output, err := actions.Execute(actionCtx, &act)
+				am.End = time.Now()
+				am.DurationMs = am.End.Sub(am.Start).Milliseconds()
+				am.Success = err == nil
+				if err != nil {
+					am.Err = err.Error()
+				}
+
+				// Collect metrics
+				actMetChan <- am
 				if err != nil {
 					errChan <- fmt.Errorf("action '%s' (%s) failed: %w", act.Action, act.ID, err)
 					return
@@ -63,15 +91,29 @@ func ExecutePlan(plan *parser.ExecutionPlan) error {
 			close(waiter)
 		}()
 
+		var stageErr error
+
 		select {
-		case err := <-errChan:
+		case stageErr = <-errChan:
 			cancelStage()
-			return err
+			<-waiter
 		case <-waiter:
 		}
+		close(actMetChan)
+		for am := range actMetChan {
+			sm.Actions = append(sm.Actions, am)
+		}
+		sm.End = time.Now()
+		sm.Finalize()
+		mm.Stages = append(mm.Stages, sm)
 		cancelStage()
+		if stageErr != nil {
+			mm.Succeeded = false
+			return mm, stageErr
+		}
 	}
-	return nil
+	mm.Succeeded = true
+	return mm, nil
 }
 
 // Update payload's placeholder with data extracted from results

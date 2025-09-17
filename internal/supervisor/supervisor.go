@@ -9,6 +9,7 @@ import (
 
 	"a-a/internal/executor"
 	"a-a/internal/logger"
+	"a-a/internal/metrics"
 	"a-a/internal/parser"
 )
 
@@ -43,6 +44,7 @@ func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.Con
 func runMission(m *Mission) {
 	var finalPlan string
 	var finalError error
+	var mm *metrics.MissionMetrics
 
 	logger.Log.Printf("Mission '%s' (ID: %s) executing", m.OriginalGoal, m.ID)
 
@@ -60,7 +62,8 @@ func runMission(m *Mission) {
 		_ = ctx // (reserved)
 		cancel()
 
-		execErr := executor.ExecutePlan(m.Plan)
+		var execErr error
+		mm, execErr = executor.ExecutePlan(m.Plan) // <-- now gets metrics
 		finalError = execErr
 
 		if execErr == nil {
@@ -91,6 +94,7 @@ func runMission(m *Mission) {
 		MissionID:    m.ID,
 		OriginalGoal: m.OriginalGoal,
 		FinalPlan:    finalPlan,
+		Metrics:      mm,
 	}
 	if finalError != nil {
 		result.Error = finalError.Error()

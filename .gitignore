@@ -1,3 +1,4 @@
 .env
 *.log
 go_code_collection.txt
+tmp/

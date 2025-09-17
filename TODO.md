@@ -2,6 +2,7 @@
     - Write mock test for parser.GeneratePlan
     - Write mock tests for actions (web, system)
     - Write E2E tests
+- Add stop mission action
 
 #### Use cases:
 1. Daily news briefing: \

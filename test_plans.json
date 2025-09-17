@@ -1,0 +1,68 @@
+[
+  {
+    "name": "sleep_parallel",
+    "allow_fail": false,
+    "plan": [
+      { 
+        "stage": 1, 
+        "actions": [
+          { "id": "mk", "action": "system.create_folder", "payload": { "path": "tmp" } }
+        ]
+      },
+      { 
+        "stage": 2, 
+        "actions": [
+          { "id": "s1", "action": "test.sleep", "payload": { "duration_ms": 1000 } },
+          { "id": "s2", "action": "test.sleep", "payload": { "duration_ms": 2000 } }
+        ]
+      },
+      { 
+        "stage": 3, 
+        "actions": [
+          { "id": "w", "action": "system.write_file", "payload": { "path": "tmp/parallel.txt", "content": "parallel done" } }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "dynamic_filename_from_result",
+    "allow_fail": false,
+    "plan": [
+      { 
+        "stage": 1, 
+        "actions": [
+          { "id": "mk", "action": "system.create_folder", "payload": { "path": "tmp" } }
+        ]
+      },
+      { 
+        "stage": 2, 
+        "actions": [
+          { "id": "tag1", "action": "test.sleep_with_return", "payload": { "duration_ms": 1000 } },
+          { "id": "tag2", "action": "test.sleep_with_return", "payload": { "duration_ms": 2000 } }
+        ]
+      },
+      { 
+        "stage": 3, 
+        "actions": [
+          { 
+            "id": "w1", 
+            "action": "system.write_file", 
+            "payload": {
+              "path": "tmp/@results.tag1.result.txt",
+              "content": "file created from tag=@results.tag1.result"
+            } 
+          },
+          { 
+            "id": "w2", 
+            "action": "system.write_file", 
+            "payload": {
+              "path": "tmp/@results.tag2.result.txt",
+              "content": "file created from tag=@results.tag2.result"
+            } 
+          }
+        ]
+      }
+    ]
+  }
+
+]

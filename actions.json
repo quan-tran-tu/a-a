@@ -9,6 +9,10 @@
     { "name": "system.write_file", "description": "Appends or writes content.", "payload_schema": {"required":["path","content"]} },
     { "name": "system.write_file_atomic", "description": "Atomically writes content to a file.", "payload_schema": {"required":["path","content"]} },
 
-    { "name": "llm.generate_content", "description": "General LLM generation.", "payload_schema": {"required":["prompt"]}, "output_schema":{"keys":["generated_content"]} }
+    { "name": "llm.generate_content", "description": "General LLM generation.", "payload_schema": {"required":["prompt"]}, "output_schema":{"keys":["generated_content"]} },
+
+    { "name": "test.sleep", "description": "Sleeps for a duration (in ms).", "payload_schema": {"required":["duration_ms"]} },
+    { "name": "test.fail", "description": "Fails after a delay (in ms).", "payload_schema": {"required":["duration_ms"]} },
+    { "name": "test.sleep_with_return", "description": "Sleeps for a duration (in ms) with return values.", "payload_schema": {"required":["duration_ms"]}, "output_schema":{"keys":["status", "result"]} }
   ]
 }

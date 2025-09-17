@@ -38,5 +38,8 @@ type ConversationTurn struct {
 }
 
 type GoalIntent struct {
-	RequiresConfirmation bool `json:"requires_confirmation"`
+	RequiresConfirmation bool     `json:"requires_confirmation"` // true if user confirmation is needed before executing
+	RunManualPlans       bool     `json:"run_manual_plans"`      // true if user wants to execute plans from a JSON file
+	ManualPlansPath      string   `json:"manual_plans_path"`     // path to the JSON file
+	ManualPlanNames      []string `json:"manual_plan_names"`     // names to run (ordered). If empty → run all
 }

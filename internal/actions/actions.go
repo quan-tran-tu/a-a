@@ -7,7 +7,9 @@ import (
 
 	"a-a/internal/actions/llm"
 	"a-a/internal/actions/system"
+	"a-a/internal/actions/test"
 	"a-a/internal/parser"
+	"a-a/internal/utils"
 )
 
 func Execute(ctx context.Context, action *parser.Action) (map[string]any, error) {
@@ -23,9 +25,11 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 	case "system":
 		return handleSystemAction(operation, action.Payload)
 	case "web":
-		return handleWebAction(ctx, operation, action.Payload)
+		return handleWebAction(operation, action.Payload)
 	case "llm":
 		return handleLlmAction(operation, action.Payload)
+	case "test":
+		return handleTestAction(ctx, operation, action.Payload)
 	case "intent":
 		if operation == "unknown" {
 			return nil, nil
@@ -34,20 +38,8 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 	return nil, fmt.Errorf("unknown action category: %s", category)
 }
 
-func getStringPayload(payload map[string]any, key string) (string, error) {
-	value, ok := payload[key]
-	if !ok {
-		return "", fmt.Errorf("payload is missing required key: '%s'", key)
-	}
-	strValue, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("payload key '%s' has an invalid type (expected string)", key)
-	}
-	return strValue, nil
-}
-
 func handleSystemAction(operation string, payload map[string]any) (map[string]any, error) {
-	path, err := getStringPayload(payload, "path")
+	path, err := utils.GetStringPayload(payload, "path")
 	if err != nil {
 		if _, ok := payload["content"]; !ok && (operation != "write_file" && operation != "write_file_atomic") {
 			return nil, err
@@ -64,13 +56,13 @@ func handleSystemAction(operation string, payload map[string]any) (map[string]an
 	case "delete_folder":
 		return nil, system.DeleteFolder(path)
 	case "write_file":
-		content, err := getStringPayload(payload, "content")
+		content, err := utils.GetStringPayload(payload, "content")
 		if err != nil {
 			return nil, err
 		}
 		return nil, system.WriteFile(path, content)
 	case "write_file_atomic":
-		content, err := getStringPayload(payload, "content")
+		content, err := utils.GetStringPayload(payload, "content")
 		if err != nil {
 			return nil, err
 		}
@@ -84,9 +76,13 @@ func handleSystemAction(operation string, payload map[string]any) (map[string]an
 	}
 }
 
-func handleWebAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
+func handleWebAction(operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	default:
+		_, err := utils.GetStringPayload(payload, "temp")
+		if err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("unknown web operation: %s", operation)
 	}
 }
@@ -94,7 +90,7 @@ func handleWebAction(ctx context.Context, operation string, payload map[string]a
 func handleLlmAction(operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	case "generate_content":
-		prompt, err := getStringPayload(payload, "prompt")
+		prompt, err := utils.GetStringPayload(payload, "prompt")
 		if err != nil {
 			return nil, err
 		}
@@ -102,5 +98,30 @@ func handleLlmAction(operation string, payload map[string]any) (map[string]any, 
 		return llm.GenerateContentGemini(prompt, model)
 	default:
 		return nil, fmt.Errorf("unknown llm operation: %s", operation)
+	}
+}
+
+func handleTestAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
+	switch operation {
+	case "sleep":
+		sleepSecond, err := utils.GetIntPayload(payload, "duration_ms")
+		if err != nil {
+			return nil, err
+		}
+		return nil, test.Sleep(ctx, sleepSecond)
+	case "fail":
+		afterSeconds, err := utils.GetIntPayload(payload, "duration_ms")
+		if err != nil {
+			afterSeconds = 0
+		}
+		return nil, test.Fail(ctx, "", afterSeconds)
+	case "sleep_with_return":
+		sleepSecond, err := utils.GetIntPayload(payload, "duration_ms")
+		if err != nil {
+			return nil, err
+		}
+		return test.SleepWithReturn(ctx, sleepSecond)
+	default:
+		return nil, fmt.Errorf("unknown test operation: %s", operation)
 	}
 }
