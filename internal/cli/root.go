@@ -16,7 +16,6 @@ import (
 	"a-a/internal/listener"
 	"a-a/internal/logger"
 	"a-a/internal/parser"
-	"a-a/internal/planner"
 	"a-a/internal/supervisor"
 )
 
@@ -159,7 +158,7 @@ var rootCmd = &cobra.Command{
 			planID := uuid.New().String()[:8]
 			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
-			plan, intent2, _, err := planner.BuildWithID(missionHistory, inputText, planID)
+			plan, intent2, _, err := parser.BuildWithID(missionHistory, inputText, planID)
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Plan generation FAILED] %v", err))
 				continue

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"a-a/internal/utils"
 )
 
 func CreateFile(path string) error {
@@ -101,4 +103,42 @@ func WriteFileAtomic(path string, content string) error {
 		return fmt.Errorf("atomic: rename: %w", err)
 	}
 	return nil
+}
+
+func HandleSystemAction(operation string, payload map[string]any) (map[string]any, error) {
+	path, err := utils.GetStringPayload(payload, "path")
+	if err != nil {
+		if _, ok := payload["content"]; !ok && (operation != "write_file" && operation != "write_file_atomic") {
+			return nil, err
+		}
+	}
+
+	switch operation {
+	case "create_file":
+		return nil, CreateFile(path)
+	case "delete_file":
+		return nil, DeleteFile(path)
+	case "create_folder":
+		return nil, CreateFolder(path)
+	case "delete_folder":
+		return nil, DeleteFolder(path)
+	case "write_file":
+		content, err := utils.GetStringPayload(payload, "content")
+		if err != nil {
+			return nil, err
+		}
+		return nil, WriteFile(path, content)
+	case "write_file_atomic":
+		content, err := utils.GetStringPayload(payload, "content")
+		if err != nil {
+			return nil, err
+		}
+		return nil, WriteFileAtomic(path, content)
+	case "read_file":
+		return ReadFile(path)
+	case "list_directory":
+		return ListDirectory(path)
+	default:
+		return nil, fmt.Errorf("unknown system operation: %s", operation)
+	}
 }

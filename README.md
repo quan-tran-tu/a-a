@@ -1,28 +1,31 @@
 # AI-Powered Autonomous Assistant (Go + Gemini)
 
-A smart command-line assistant that turns natural language goals into structured plans and executes them **autonomously in the background**.
+A smart command-line assistant that turns natural-language goals into structured plans and executes them **autonomously in the background**.
 
-Built in Go with a clean supervisor → executor architecture, per-stage concurrency, and strict action validation driven by an external `actions.json` registry.
+Built in Go with a clean **supervisor → executor** pipeline, **per-stage concurrency**, **result piping** (`@results.<id>.<key>`), and **strict action validation** via an external `actions.json` registry.
 
 ---
 
 ## Key Capabilities
 
 ### 1) Goal → Plan (LLM-driven)
-You type a goal; the assistant:
-- Analyzes whether it should show the plan for confirmation.
-- Produces a **multi-stage JSON plan** where actions in the same stage run in parallel; stages run sequentially.
-- Enforces allowed actions and payloads from `actions.json`.
 
-Plan JSON can reference earlier outputs via:
+You type a goal; the assistant:
+
+* Analyzes intent (whether to **show/confirm** a plan, or run **manual plans** from a file).
+* Produces a **multi-stage JSON plan** where actions in the same stage run in parallel; stages run sequentially.
+* Enforces allowed actions & required payloads from `actions.json`.
+
+Plans can reference earlier outputs via:
+
 ```
 @results.<action_id>.<output_key>
 ```
 
 ### 2) Autonomous Background Execution
-Once you accept a plan (when needed), the mission runs in the background and you immediately get your prompt back.
 
-Example:
+If a plan needs confirmation (intent/risk), you’ll see a preview. Once accepted, the **mission runs in the background** and you immediately get your prompt back.
+
 ```
 > create hello.md and write "hello" 10 times
 Generating plan for the above query, plan's ID: 4f69caf8 ...
@@ -33,64 +36,101 @@ Generating plan for the above query, plan's ID: 4f69caf8 ...
 ```
 
 ### 3) Safety & Confirmation
-Two mechanisms can trigger a confirmation step:
-- **Intent**: If your request explicitly asks to “show/confirm the plan”.
-- **Risky actions**: Currently `system.delete_folder` (and reserved `system.execute_shell`) are considered risky.
 
-You’ll see a formatted preview of the plan and must approve it before execution.
+Two triggers:
 
-### 4) Retries (Fail-fast per stage)
-- Actions within a stage run concurrently with a **30s per-action timeout**.
-- If any action in a stage fails, the stage cancels (fail-fast), and the mission **retries** up to **3** times (with a brief backoff).
-- **Note**: Currently, retries **reuse the same plan**. Auto-**replanning** after failures is on the roadmap (see below).
+* **Intent**: e.g., “show/preview/confirm the plan”.
+* **Risky actions**: currently `system.delete_folder` (and reserved `system.execute_shell`) are treated as **risky**.
 
-### 5) Short-term Memory (Context)
-The assistant keeps the last **3** conversation turns (goal + plan + any error) to provide context to the planner and display.
+Risky plans require **explicit approval**.
 
-### 6) Logging
-Everything goes to `assistant.log`: startup, plans (full in logs, pretty-printed in CLI), executions, errors, mission results.
+### 4) Retries & Timeouts (Fail-fast per stage)
+
+* Actions inside a stage run concurrently with a **30s per-action timeout**.
+* If any action fails, the **stage cancels** (fail-fast).
+* Mission **retries up to 3 times** with brief backoff (same plan; re-planning is on the roadmap).
+
+### 5) Short-term Memory
+
+The CLI keeps the last **3** turns (goal + plan + error) to give the planner context.
+
+### 6) Metrics & Logging
+
+* Per-action and per-stage timing printed after completion.
+* All logs go to `assistant.log` (startup, plans, runs, errors, results).
 
 ---
 
 ## Implemented Actions (Current)
 
-**File system (system.\*)**
-- `system.create_file` — Create an empty file.
-- `system.delete_file` — Delete a file.
-- `system.create_folder` — Create a directory (all parents).
-- `system.delete_folder` — Recursively delete a directory.
-- `system.write_file` — **Append** a line (adds `\n`) to a file, creating it if needed.
-- `system.write_file_atomic` — **Atomic replace/write** using a temp file + rename (no implicit newline).
-- `system.read_file` — Read file → returns `{ "content": string }`.
-- `system.list_directory` — List entries → returns `{ "entries": []string }`.
+### File system (`system.*`)
 
-**LLM (llm.\*)**
-- `llm.generate_content` — Generate text with Gemini → returns `{ "generated_content": string }`.
+* `system.create_file` — Create an empty file.
+* `system.delete_file` — Delete a file.
+* `system.create_folder` — Create a directory (parents included).
+* `system.delete_folder` — Recursively delete a directory. **(risky)**
+* `system.write_file` — **Append** a line (adds `\n`) to a file (creates if missing).
+* `system.write_file_atomic` — **Atomic replace/write** (temp file + `rename`, **no** trailing newline).
+* `system.read_file` — Returns `{ "content": string }`.
+* `system.list_directory` — Returns `{ "entries": []string }`.
+
+### LLM (`llm.*`)
+
+* `llm.generate_content` — Generate text with Gemini → `{ "generated_content": string }`.
+  *Model guardrail:* defaults to `gemini-2.0-flash` unless payload `model` starts with `gemini-`.
+
+### Web (`web.*`)
+
+* Placeholder for web related actions.
 
 ---
 
-## Architecture breakdown
+## Architecture
 
-1. **CLI loop** (`internal/cli`): Reads your goal, captures recent history, and calls the planner.
-2. **Planner** (`internal/planner`, `internal/parser`):
-   - `AnalyzeGoalIntent` → `{ requires_confirmation: bool }`
-   - `GeneratePlan` → JSON plan, validated against **`actions.json`**
-3. **Supervisor** (`internal/supervisor`):
-   - Queues missions, runs them, retries on failure, emits results to a channel for async status lines.
-4. **Executor** (`internal/executor`):
-   - Runs stages sequentially; actions within a stage concurrently (30s timeout/action).
-   - Replaces payload placeholders with prior results (`@results.<id>.<key>`).
-5. **Actions** (`internal/actions`): Dispatches to `system.*` and `llm.*` implementations.
+1. **CLI** (`internal/cli`)
+   REPL loop, recent history, confirmation, mission submission.
+
+2. **Planning & Intent** (`internal/parser/planner.go`)
+
+   * `AnalyzeGoalIntent(goal)` → `{ requires_confirmation, run_manual_plans, manual_plans_path, manual_plan_names }`
+   * `GeneratePlan(history, goal)` → JSON plan (validated against `actions.json`)
+   * `BuildWithID(...)` → returns `(plan, intent, planID)`
+
+3. **Supervisor** (`internal/supervisor`)
+   Mission queue, retries, risk checks, and async result publication.
+
+4. **Executor** (`internal/executor`)
+
+   * Stages sequential; actions within a stage **concurrent** (30s timeout/action).
+   * Replaces payload placeholders via `@results.<action_id>.<output_key>` before execution.
+   * Collects **per-action** and **per-stage** metrics.
+
+5. **Actions** (`internal/actions/...`)
+
+   * `actions.Execute` only **routes** to category handlers.
+   * Implementations live in subpackages:
+
+     * `actions/system`, `actions/llm`, `actions/web`, `actions/test`.
+
+6. **LLM Client** (`internal/llm_client`)
+   Thin wrapper around `google.golang.org/genai` with helpers:
+
+   * `InitGeminiClient()`, `Generate()`, `GenerateJSON()`.
+
+7. **Display** (`internal/display`)
+   Pretty plan output, catalog printing, and metrics formatting.
 
 ---
 
 ## The Action Registry (`actions.json`)
 
-At startup the assistant loads **`actions.json`** (see `parser.LoadRegistry()`), uses it to:
-- Generate the planner’s “Available actions” prompt section.
-- Validate that any LLM-generated plan only uses **allowed actions** with **required payload keys**.
+Loaded at startup via `parser.LoadRegistry()` and used to:
 
-### Minimal example (`actions.json`)
+* Build the planner’s “available actions & payloads” prompt section.
+* Validate that LLM plans only use **allowed actions** with **required keys** present.
+
+**Example**
+
 ```json
 {
   "actions": [
@@ -124,21 +164,81 @@ At startup the assistant loads **`actions.json`** (see `parser.LoadRegistry()`),
 
 ---
 
+## Manual Missions from a JSON File
+
+Ask the assistant to **run plans from a file** (single or multiple). Supported shapes:
+
+1. **Object with `plans` (preferred)**
+
+```json
+{
+  "plans": [
+    { "name": "alpha", "plan": [ { "stage": 1, "actions": [...] } ] },
+    { "plan": [ { "stage": 1, "actions": [...] } ] },
+    [ { "stage": 1, "actions": [...] } ]   // bare array entry
+  ]
+}
+```
+
+2. **Bare array (multi-plan)**
+
+```json
+[
+  { "name": "alpha", "plan": [ ... ] },
+  { "plan": [ ... ] },
+  [ { "stage": 1, "actions": [...] } ]
+]
+```
+
+3. **Single plan**
+
+```json
+{ "plan": [ ... ] }
+```
+
+or
+
+```json
+[ { "stage": 1, "actions": [...] } ]
+```
+
+* Unnamed plans auto-named: `manual:<base>#<index>`.
+* Selecting by name is **exact, case-insensitive**.
+* If `requires_confirmation` is true, you’ll see a **catalog** and a **prompt** before running.
+
+**Examples**
+
+```
+> show plans from tests/test_plans.json
+# (prints catalog and asks to proceed)
+
+> execute the plans "Create file", "Import Data" in test.json
+# runs selected missions in order; warns if any names are missing
+
+> run all plans in scripts/batch.json
+# runs every valid mission in the file
+```
+
+---
+
 ## Installation & Run
 
-1) **Environment** \
-Create `.env` with your Gemini key:
+1. **Environment**
+
 ```env
+# .env
 GEMINI_API_KEY=your_api_key_here
 ```
 
-2) **Build**
+2. **Build**
+
 ```bash
 go mod tidy
 go build -o assistant ./cmd/assistant
 ```
 
-3) **Run**
+3. **Run**
+
 ```bash
 ./assistant
 # or during development:
@@ -147,15 +247,28 @@ go run ./cmd/assistant
 
 ---
 
-## Usage Examples
+## Testing
 
-### Create and write to a file (with result piping)
+Run all tests:
+
+```bash
+go test ./...
+```
+
+**Notes:** Current tests only cover a few unit tests.
+
+---
+
+## Usage Example (typical plan preview)
+
 Goal:
+
 ```
 create hello.md and write into it 10 times hello for me, give me the plan first
 ```
 
-A typical plan (formatted preview) might look like:
+Preview:
+
 ```
 Proposed execution plan:
 --------------------------------------------------
@@ -180,67 +293,75 @@ Do you want to execute this plan? [y/n] >
 
 ## Timeouts, Concurrency & Errors
 
-- **Concurrency:** Actions within a stage run in parallel goroutines.
-- **Timeouts:** Each action has a **30s** timeout.
-- **Fail-fast per stage:** Any action error cancels the stage; mission may retry (up to **3** attempts).
-- **Placeholder resolution:** Payload strings are scanned for `@results.<id>.<key>` and replaced before execution.
+* **Concurrency:** Actions within the same stage run in goroutines.
+* **Timeouts:** Each action has a **30s** timeout.
+* **Fail-fast:** First action error cancels the stage. Mission may retry up to **3** times.
+* **Placeholder resolution:** Strings matching `@results.<id>.<key>` (IDs/keys are `\w+`) are replaced with prior outputs before execution.
 
 ---
 
-## Testing
+## Project Layout (Current)
 
-Run all tests:
-```bash
-go test ./...
 ```
+cmd/
+  assistant/
+    main.go            # boot: .env → logger → LLM → action registry → CLI
 
-Notes:
-- Some tests reference non-implemented actions like `apps.open` or `web.search` to verify **formatting** and **risk detection** only.
-- Risk detection currently flags `system.delete_folder` (and a reserved `system.execute_shell`) as risky.
-
----
-
-## Roadmap (Near-term)
-
-- **Extend actions:** Web.
-- **Multi-plan:** Some goals can require multiple plans, where later plan depends on the output of the previous one.
-
+internal/
+  actions/
+    actions.go         # dispatcher (category → handler)
+    llm/
+      llm.go           # generate_content handler
+    system/
+      system.go        # file/folder read/write/create/delete + handler
+    test/
+      test.go          # sleep/fail helpers + handler
+    web/
+      web.go           # placeholder; add actual web.* actions here
+  cli/
+    root.go            # REPL, history, confirmation, mission submission
+    execute.go
+  display/
+    plans.go           # plan formatting + catalog
+    metrics.go         # metrics formatting
+  executor/
+    executor.go        # per-stage concurrency, timeout, @results resolution
+    executor_test.go
+  listener/
+    listener.go        # readline-based UI helpers
+  llm_client/
+    gemini.go          # genai client, Generate/GenerateJSON helpers
+  logger/
+    logger.go
+  metrics/
+    metrics.go
+  parser/
+    action.go          # shared plan/registry types
+    plan_loader.go     # load/parse multi/single-plan JSON files
+    planner.go         # AnalyzeGoalIntent, GeneratePlan, BuildWithID
+    registry.go        # load/validate action registry, prompt part
+    registry_test.go
+  supervisor/
+    mission.go         # mission model
+    result.go          # result channel payload
+    supervisor.go      # queue, retries, risk detection
+    supervisor_test.go
+  utils/
+    get_payload.go     # payload parsing helpers (string/int)
+```
 
 ---
 
 ## Troubleshooting
 
-- **`GEMINI_API_KEY` not set**  
-  `Fatal Error: Could not initialize LLM client` — Export the key or put it in `.env`.
+* **`GEMINI_API_KEY` not set**
+  → “Could not initialize LLM client” — put the key in `.env`.
 
-- **`actions.json` missing or invalid**  
-  `Fatal Error: Could not load action registry` — Ensure `actions.json` exists in the working directory and matches the schema above.
+* **`actions.json` missing/invalid**
+  → “Could not load action registry” — ensure file exists and matches the schema.
 
-- **Long-running steps time out**  
-  Increase timeouts in code (`internal/executor/executor.go`) if needed.
-
----
-
-## Project Layout
-
-```
-cmd/
-  assistant/
-    main.go           # boot: .env → logger → LLM → action registry → CLI
-internal/
-  actions/
-  cli/
-    root.go           # REPL loop, history, confirmation, mission submit
-    execute.go
-  display/            # pretty/compact plan formatting
-  executor/           # per-stage concurrency, timeout, @results resolution
-  llm_client/         # google.golang.org/genai wrapper
-  listener/           # terminal input helper (readline)
-  logger/             # file logger (assistant.log)
-  parser/             # plan+intent prompts, JSON parse, registry validation
-  planner/            # glue: builds intent+plan (with plan ID)
-  supervisor/         # mission queue, retries, result channel
-```
+* **Long steps time out**
+  → Increase `actionTimeout` in `internal/executor/executor.go`.
 
 ---
 

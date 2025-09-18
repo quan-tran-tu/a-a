@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"a-a/internal/llm_client"
 )
 
@@ -115,4 +117,19 @@ func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
 		intent.ManualPlansPath = ""
 	}
 	return &intent, nil
+}
+
+func BuildWithID(history []ConversationTurn, userGoal, planID string) (*ExecutionPlan, *GoalIntent, string, error) {
+	if planID == "" {
+		planID = uuid.New().String()[:8]
+	}
+	intent, err := AnalyzeGoalIntent(userGoal)
+	if err != nil {
+		return nil, nil, planID, err
+	}
+	plan, err := GeneratePlan(history, userGoal)
+	if err != nil {
+		return nil, intent, planID, err
+	}
+	return plan, intent, planID, nil
 }
