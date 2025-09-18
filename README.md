@@ -172,9 +172,9 @@ Ask the assistant to **run plans from a file** (single or multiple). Supported s
 ```json
 {
   "plans": [
-    { "name": "alpha", "plan": [ { "stage": 1, "actions": [...] } ] },
-    { "plan": [ { "stage": 1, "actions": [...] } ] },
-    [ { "stage": 1, "actions": [...] } ]   // bare array entry
+    { "name": "alpha", "plan": [ { "stage": 1, "actions": [] } ] },
+    { "plan": [ { "stage": 1, "actions": [] } ] },
+    [ { "stage": 1, "actions": [] } ]   // bare array entry
   ]
 }
 ```
@@ -183,22 +183,22 @@ Ask the assistant to **run plans from a file** (single or multiple). Supported s
 
 ```json
 [
-  { "name": "alpha", "plan": [ ... ] },
-  { "plan": [ ... ] },
-  [ { "stage": 1, "actions": [...] } ]
+  { "name": "alpha", "plan": [] },
+  { "plan": [] },
+  [ { "stage": 1, "actions": [] } ]
 ]
 ```
 
 3. **Single plan**
 
 ```json
-{ "plan": [ ... ] }
+{ "plan": [] }
 ```
 
 or
 
 ```json
-[ { "stage": 1, "actions": [...] } ]
+[ { "stage": 1, "actions": [] } ]
 ```
 
 * Unnamed plans auto-named: `manual:<base>#<index>`.
