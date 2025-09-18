@@ -94,7 +94,6 @@ The CLI keeps the last **3** turns (goal + plan + error) to give the planner con
 
    * `AnalyzeGoalIntent(goal)` → `{ requires_confirmation, run_manual_plans, manual_plans_path, manual_plan_names }`
    * `GeneratePlan(history, goal)` → JSON plan (validated against `actions.json`)
-   * `BuildWithID(...)` → returns `(plan, intent, planID)`
 
 3. **Supervisor** (`internal/supervisor`)
    Mission queue, retries, risk checks, and async result publication.
@@ -311,13 +310,13 @@ internal/
   actions/
     actions.go         # dispatcher (category → handler)
     llm/
-      llm.go           # generate_content handler
+      llm.go           # llm calls handler
     system/
-      system.go        # file/folder read/write/create/delete + handler
+      system.go        # system ops handler
     test/
-      test.go          # sleep/fail helpers + handler
+      test.go          # helpers handler for testing the architecture flow
     web/
-      web.go           # placeholder; add actual web.* actions here
+      web.go           # placeholder
   cli/
     root.go            # REPL, history, confirmation, mission submission
     execute.go
@@ -338,7 +337,7 @@ internal/
   parser/
     action.go          # shared plan/registry types
     plan_loader.go     # load/parse multi/single-plan JSON files
-    planner.go         # AnalyzeGoalIntent, GeneratePlan, BuildWithID
+    planner.go         # AnalyzeGoalIntent, GeneratePlan
     registry.go        # load/validate action registry, prompt part
     registry_test.go
   supervisor/
@@ -347,7 +346,7 @@ internal/
     supervisor.go      # queue, retries, risk detection
     supervisor_test.go
   utils/
-    get_payload.go     # payload parsing helpers (string/int)
+    get_payload.go     # payload parsing helpers
 ```
 
 ---
