@@ -1,12 +1,13 @@
 package web
 
 import (
+	"context"
 	"fmt"
 
 	"a-a/internal/utils"
 )
 
-func HandleWebAction(operation string, payload map[string]any) (map[string]any, error) {
+func HandleWebAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	default:
 		_, err := utils.GetStringPayload(payload, "temp")

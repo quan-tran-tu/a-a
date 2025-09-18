@@ -28,7 +28,7 @@ func InitGeminiClient() error {
 	return nil
 }
 
-func Generate(prompt string, model string) (string, error) {
+func Generate(ctx context.Context, prompt string, model string) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("LLM client is not initialized")
 	}
@@ -37,7 +37,6 @@ func Generate(prompt string, model string) (string, error) {
 		model = "gemini-2.0-flash"
 	}
 
-	ctx := context.Background()
 	result, err := client.Models.GenerateContent(ctx, model, genai.Text(prompt), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content via Gemini: %w", err)
@@ -58,7 +57,7 @@ func Generate(prompt string, model string) (string, error) {
 	return generatedText, nil
 }
 
-func GenerateJSON(prompt, model string, responseJsonSchema any) (string, error) {
+func GenerateJSON(ctx context.Context, prompt, model string, responseJsonSchema any) (string, error) {
 	if client == nil {
 		return "", fmt.Errorf("LLM client is not initialized")
 	}
@@ -72,7 +71,6 @@ func GenerateJSON(prompt, model string, responseJsonSchema any) (string, error) 
 	if responseJsonSchema != nil {
 		cfg.ResponseJsonSchema = responseJsonSchema
 	}
-	ctx := context.Background()
 	resp, err := client.Models.GenerateContent(ctx, model, genai.Text(prompt), cfg)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JSON via Gemini: %w", err)

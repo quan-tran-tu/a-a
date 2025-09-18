@@ -1,11 +1,10 @@
 package parser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/google/uuid"
 
 	"a-a/internal/llm_client"
 )
@@ -73,10 +72,10 @@ func buildIntentPrompt(userGoal string) string {
 }
 
 // Generating plan for a mission
-func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
+func GeneratePlan(ctx context.Context, history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
 	prompt := buildPlanPrompt(history, userGoal)
 
-	cleanJson, err := llm_client.GenerateJSON(prompt, "gemini-2.0-flash", nil)
+	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "gemini-2.0-flash", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate plan from LLM: %w", err)
 	}
@@ -99,10 +98,10 @@ func GeneratePlan(history []ConversationTurn, userGoal string) (*ExecutionPlan, 
 	return &plan, nil
 }
 
-func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
+func AnalyzeGoalIntent(ctx context.Context, userGoal string) (*GoalIntent, error) {
 	prompt := buildIntentPrompt(userGoal)
 
-	cleanJson, err := llm_client.GenerateJSON(prompt, "gemini-2.0-flash", nil)
+	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "gemini-2.0-flash", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate intent from LLM: %w", err)
 	}
@@ -117,19 +116,4 @@ func AnalyzeGoalIntent(userGoal string) (*GoalIntent, error) {
 		intent.ManualPlansPath = ""
 	}
 	return &intent, nil
-}
-
-func BuildWithID(history []ConversationTurn, userGoal, planID string) (*ExecutionPlan, *GoalIntent, string, error) {
-	if planID == "" {
-		planID = uuid.New().String()[:8]
-	}
-	intent, err := AnalyzeGoalIntent(userGoal)
-	if err != nil {
-		return nil, nil, planID, err
-	}
-	plan, err := GeneratePlan(history, userGoal)
-	if err != nil {
-		return nil, intent, planID, err
-	}
-	return plan, intent, planID, nil
 }

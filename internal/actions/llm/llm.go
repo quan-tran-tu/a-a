@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,9 +18,9 @@ func allowedModelOrDefault(m string) string {
 	return m
 }
 
-func GenerateContentGemini(prompt string, model_name string) (map[string]any, error) {
+func GenerateContentGemini(ctx context.Context, prompt string, model_name string) (map[string]any, error) {
 	model := allowedModelOrDefault(model_name)
-	generatedText, err := llm_client.Generate(prompt, model)
+	generatedText, err := llm_client.Generate(ctx, prompt, model)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,7 @@ func GenerateContentGemini(prompt string, model_name string) (map[string]any, er
 	return output, nil
 }
 
-func HandleLlmAction(operation string, payload map[string]any) (map[string]any, error) {
+func HandleLlmAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
 	case "generate_content":
 		prompt, err := utils.GetStringPayload(payload, "prompt")
@@ -37,7 +38,7 @@ func HandleLlmAction(operation string, payload map[string]any) (map[string]any, 
 			return nil, err
 		}
 		model, _ := payload["model"].(string)
-		return GenerateContentGemini(prompt, model)
+		return GenerateContentGemini(ctx, prompt, model)
 	default:
 		return nil, fmt.Errorf("unknown llm operation: %s", operation)
 	}

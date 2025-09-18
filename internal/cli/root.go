@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -94,7 +96,9 @@ var rootCmd = &cobra.Command{
 			copy(missionHistory, cliConversationHistory)
 			historyMutex.Unlock()
 
-			intent, err := parser.AnalyzeGoalIntent(inputText)
+			intentCtx, cancelIntent := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancelIntent()
+			intent, err := parser.AnalyzeGoalIntent(intentCtx, inputText)
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Intent analysis FAILED] %v", err))
 				continue
@@ -158,7 +162,10 @@ var rootCmd = &cobra.Command{
 			planID := uuid.New().String()[:8]
 			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
-			plan, intent2, _, err := parser.BuildWithID(missionHistory, inputText, planID)
+			// Context for intent recognition + plan generation
+			planBudgetCtx, cancelPlanBudget := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancelPlanBudget()
+			plan, err := parser.GeneratePlan(planBudgetCtx, missionHistory, inputText)
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Plan generation FAILED] %v", err))
 				continue
@@ -169,7 +176,7 @@ var rootCmd = &cobra.Command{
 				planID, inputText, display.FormatPlanFull(plan))
 
 			// Log/preview plan for user if confirmation is needed or if risky
-			needsConfirm := intent2.RequiresConfirmation || supervisor.IsPlanRisky(plan)
+			needsConfirm := intent.RequiresConfirmation || supervisor.IsPlanRisky(plan)
 			if needsConfirm {
 				pretty := display.FormatPlan(plan)
 				listener.AsyncPrintln(pretty)

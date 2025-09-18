@@ -23,11 +23,11 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 
 	switch category {
 	case "system":
-		return system.HandleSystemAction(operation, action.Payload)
+		return system.HandleSystemAction(ctx, operation, action.Payload)
 	case "web":
-		return web.HandleWebAction(operation, action.Payload)
+		return web.HandleWebAction(ctx, operation, action.Payload)
 	case "llm":
-		return llm.HandleLlmAction(operation, action.Payload)
+		return llm.HandleLlmAction(ctx, operation, action.Payload)
 	case "test":
 		return test.HandleTestAction(ctx, operation, action.Payload)
 	case "intent":

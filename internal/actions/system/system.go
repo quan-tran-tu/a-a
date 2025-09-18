@@ -1,6 +1,7 @@
 package system
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,12 +106,18 @@ func WriteFileAtomic(path string, content string) error {
 	return nil
 }
 
-func HandleSystemAction(operation string, payload map[string]any) (map[string]any, error) {
+func HandleSystemAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	path, err := utils.GetStringPayload(payload, "path")
 	if err != nil {
 		if _, ok := payload["content"]; !ok && (operation != "write_file" && operation != "write_file_atomic") {
 			return nil, err
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	switch operation {
