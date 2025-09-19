@@ -40,7 +40,6 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan) (*metrics.Miss
 		}
 		// Cancellation signal for the stage (fail fast mechanism)
 		stageCtx, cancelStage := context.WithCancel(ctx)
-		defer cancelStage()
 
 		var wg sync.WaitGroup // A counter to notify when all goroutines are finished
 		errChan := make(chan error, len(stage.Actions))
