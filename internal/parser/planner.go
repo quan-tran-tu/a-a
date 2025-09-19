@@ -15,31 +15,41 @@ var registry *ActionRegistry
 func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an expert AI workflow planner. Your task is to convert a user's goal into a structured JSON execution plan. Respond ONLY with the JSON plan. Do not include any other text, explanations, or markdown formatting.\n\n")
+	sb.WriteString("You are an expert AI workflow planner. Convert the user's goal into a STRICT JSON execution plan with schema: {\"plan\":[{\"stage\":<int>,\"actions\":[{\"id\":\"<slug>\",\"action\":\"<category.operation>\",\"payload\":{...}}]}]}.\n")
+	sb.WriteString("Respond ONLY with JSON. No extra text.\n\n")
+
 	if len(history) > 0 {
-		sb.WriteString("CONVERSATION HISTORY (for context):\n")
+		sb.WriteString("CONVERSATION HISTORY (context):\n")
 		for _, turn := range history {
 			sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", turn.UserGoal))
 			sb.WriteString(fmt.Sprintf("Previous Assistant Plan: %s\n", turn.AssistantPlan))
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("The plan consists of stages. All actions in one stage run in parallel. The plan proceeds to the next stage only after the current one is complete. Action outputs can be referenced in later stages using the '@results.action_id.output_key' syntax.\n\n")
+
+	sb.WriteString("SEMANTICS:\n")
+	sb.WriteString("- Actions in the SAME stage run IN PARALLEL.\n")
+	sb.WriteString("- Stages run SEQUENTIALLY (stage N completes before stage N+1).\n")
+	sb.WriteString("- Only outputs from PRIOR stages may be referenced via '@results.<action_id>.<key>'.\n\n")
+
 	sb.WriteString(registry.GeneratePromptPart() + "\n")
 
 	sb.WriteString("\nHARD RULES:\n")
-	sb.WriteString("- The LLM must NOT invent or guess URLs. Do not 'generate' URL lists.\n")
-	sb.WriteString("- Discover pagination and detail links ONLY from the provided HTML using html.* actions (e.g., `html.links`).\n")
-	sb.WriteString("- All network I/O (fetching pages) must use `web.request` or `web.batch_request`.\n")
-	sb.WriteString("- Before passing URLs to actions that expect a list of strings (e.g., batch fetch), extract strings with `list.pluck` (field=\"url\") from link objects.\n")
-	sb.WriteString("- Use `url.normalize` and `list.unique` before batch fetches.\n")
-	sb.WriteString("- Use `llm.extract_structured` ONLY to map provided HTML/text to a strict schema. If a field is missing, output null/empty; never invent.\n")
-	sb.WriteString("- Write files with `system.write_file_atomic`.\n\n")
+	sb.WriteString("1) NO SAME-STAGE DEPENDENCIES: If an action references '@results.<id>', that referenced action MUST be in a STRICTLY EARLIER stage. Do not place dependent actions in the same stage. Within any stage, actions must be independent (no '@results' that point to same-stage IDs).\n")
+	sb.WriteString("2) NETWORK I/O: Use only 'web.request' (single) or 'web.batch_request' (many) for fetching content.\n")
+	sb.WriteString("3) LINK DISCOVERY: Discover links ONLY from provided HTML using 'html.links' (single page) or 'html.links_bulk' (multiple pages). Never invent URLs.\n")
+	sb.WriteString("4) URL LIST PIPELINE: When preparing URLs for batch fetching, use: 'list.pluck' (field=\"url\") → 'url.normalize' → 'list.unique'.\n")
+	sb.WriteString("5) BASE URL:\n")
+	sb.WriteString("   - For 'html.links', ALWAYS provide 'base_url' equal to the exact page URL whose HTML you pass.\n")
+	sb.WriteString("   - For 'url.normalize', provide an appropriate 'base_url' when inputs may be relative.\n")
+	sb.WriteString("   - For 'html.links_bulk', do NOT override per-page bases unless necessary (omit 'base_url' so each page's own URL is used).\n")
+	sb.WriteString("6) *_json PAYLOADS: Any payload key ending with '_json' (e.g., 'urls_json', 'list_json', 'pages_json', 'values_json') MUST be a STRING containing a valid JSON array. If empty, use \"[]\". Do NOT pass a bare array value.\n")
+	sb.WriteString("7) LIST FILTERING: Use 'llm.select_from_list' to select a subset from an array (verbatim copies of items). Do not rewrite items.\n")
+	sb.WriteString("8) STRUCTURED EXTRACTION: Use 'llm.extract_structured' to map raw HTML/text into a strict JSON schema. If a field is missing, output an empty string/array; never fabricate data.\n")
+	sb.WriteString("9) PERSISTENCE: Save files using 'system.write_file_atomic'.\n")
+	sb.WriteString("10) IDS: All action IDs must be unique, short, lowercase (e.g., 'fetch_seed', 'select_pages', 'fetch_profiles', 'extract_items').\n")
 
-	sb.WriteString("EXAMPLE:\n")
-	sb.WriteString("User Goal: \"Summarize the homepages of the NY Times and Reuters and save the summary to a file named 'news.md'\"\n")
-	sb.WriteString("Assistant: {\"plan\":[{\"stage\":1,\"actions\":[{\"id\":\"fetch_nytimes\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.nytimes.com\"}},{\"id\":\"fetch_reuters\",\"action\":\"web.fetch_page_content\",\"payload\":{\"url\":\"https://www.reuters.com\"}}]},{\"stage\":2,\"actions\":[{\"id\":\"summarize_news\",\"action\":\"llm.generate_content\",\"payload\":{\"prompt\":\"Summarize these two articles:\\n\\nArticle 1: @results.fetch_nytimes.content\\n\\nArticle 2: @results.fetch_reuters.content\"}}]},{\"stage\":3,\"actions\":[{\"id\":\"save_summary\",\"action\":\"system.write_file\",\"payload\":{\"path\":\"news.md\",\"content\":\"@results.summarize_news.generated_content\"}}]}]}\n\n")
-	sb.WriteString("Now, generate a plan for the following user goal:\n")
+	sb.WriteString("\nNow, generate a plan for the following user goal:\n")
 	sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", userGoal))
 	sb.WriteString("Assistant: ")
 
@@ -89,13 +99,9 @@ func GeneratePlan(ctx context.Context, history []ConversationTurn, userGoal stri
 		return nil, fmt.Errorf("error parsing generated plan JSON: %v\nRaw Response: %s", err, cleanJson)
 	}
 
-	// Check for invalid action found in LLM response
-	for _, stage := range plan.Plan {
-		for _, action := range stage.Actions {
-			if err := registry.ValidateAction(&action); err != nil {
-				return nil, fmt.Errorf("generated plan contains an invalid action: %w", err)
-			}
-		}
+	// Validate actions and plan structure
+	if err := ValidatePlan(&plan); err != nil {
+		return nil, fmt.Errorf("generated plan invalid: %w", err)
 	}
 
 	return &plan, nil

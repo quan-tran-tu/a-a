@@ -5,12 +5,44 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 type NamedPlan struct {
 	Name string
 	Plan *ExecutionPlan
+}
+
+var resultsRefRe = regexp.MustCompile(`@results\.([A-Za-z0-9_\-]+)\.`)
+
+func validateStageDependencies(plan *ExecutionPlan) error {
+	seen := map[string]struct{}{} // action IDs completed in prior stages
+
+	for si, stage := range plan.Plan {
+		for _, act := range stage.Actions {
+			for _, v := range act.Payload {
+				s, ok := v.(string)
+				if !ok {
+					continue
+				}
+				matches := resultsRefRe.FindAllStringSubmatch(s, -1)
+				for _, m := range matches {
+					refID := m[1]
+					if _, ok := seen[refID]; !ok {
+						return fmt.Errorf("stage %d action '%s' references @results.%s, which is not available yet (same or later stage). Move this action to a later stage",
+							si+1, act.ID, refID)
+					}
+				}
+			}
+		}
+		for _, act := range stage.Actions {
+			if act.ID != "" {
+				seen[act.ID] = struct{}{}
+			}
+		}
+	}
+	return nil
 }
 
 /*
@@ -190,6 +222,9 @@ func ValidatePlan(plan *ExecutionPlan) error {
 				return err
 			}
 		}
+	}
+	if err := validateStageDependencies(plan); err != nil {
+		return err
 	}
 	return nil
 }

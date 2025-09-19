@@ -10,9 +10,27 @@
     { "name": "system.write_file_atomic", "description": "Atomically writes content to a file.", "payload_schema": {"required":["path","content"]} },
 
     { "name": "llm.generate_content", "description": "General LLM generation.", "payload_schema": {"required":["prompt"]}, "output_schema":{"keys":["generated_content"]} },
+    { "name": "llm.extract_structured", "description": "Extract structured JSON conforming to a provided JSON schema from input text/HTML.", "payload_schema": {"required":["input","schema"]}, "output_schema":{"keys":["json"]} },
+    { "name": "llm.select_from_list", "description": "From a JSON array (list_json), return a subset based on a natural-language instruction (verbatim copies of items).", "payload_schema": {"required":["list_json","instruction"]}, "output_schema":{"keys":["selected_json"]} },
+
+    { "name": "web.request", "description": "HTTP request (GET by default) to fetch a page.", "payload_schema": {"required":["url"]}, "output_schema":{"keys":["url","status_code","content"]} },
+    { "name": "web.batch_request", "description": "Fetch many URLs concurrently.", "payload_schema": {"required":["urls_json"]}, "output_schema":{"keys":["responses_json"]} },
+
+    { "name": "html.links", "description": "Extract <a> links (text + absolute URL) from a single HTML.", "payload_schema": {"required":["html"]}, "output_schema":{"keys":["links_json"]} },
+    { "name": "html.links_bulk", "description": "Extract <a> links from many pages; input is responses_json array.", "payload_schema": {"required":["pages_json"]}, "output_schema":{"keys":["links_json"]} },
+    { "name": "html.select_all", "description": "Select nodes by CSS selector; return array of outerHTML strings.", "payload_schema": {"required":["html","selector"]}, "output_schema":{"keys":["items_json"]} },
+    { "name": "html.inner_text", "description": "Extract plain text from an HTML snippet.", "payload_schema": {"required":["html"]}, "output_schema":{"keys":["text"]} },
+
+    { "name": "list.pluck", "description": "From an array of objects (list_json), pluck one field into an array of strings.", "payload_schema": {"required":["list_json","field"]}, "output_schema":{"keys":["values_json"]} },
+    { "name": "list.unique", "description": "Deduplicate an array.", "payload_schema": {"required":["list_json"]}, "output_schema":{"keys":["list_json"]} },
+    { "name": "list.concat", "description": "Concatenate two arrays.", "payload_schema": {"required":["a_json","b_json"]}, "output_schema":{"keys":["list_json"]} },
+
+    { "name": "url.normalize", "description": "Resolve/normalize relative URLs against an optional base_url.", "payload_schema": {"required":["urls_json"]}, "output_schema":{"keys":["urls_json"]} },
 
     { "name": "test.sleep", "description": "Sleeps for a duration (in ms).", "payload_schema": {"required":["duration_ms"]} },
     { "name": "test.fail", "description": "Fails after a delay (in ms).", "payload_schema": {"required":["duration_ms"]} },
-    { "name": "test.sleep_with_return", "description": "Sleeps for a duration (in ms) with return values.", "payload_schema": {"required":["duration_ms"]}, "output_schema":{"keys":["status", "result"]} }
+    { "name": "test.sleep_with_return", "description": "Sleeps for a duration (in ms) with return values.", "payload_schema": {"required":["duration_ms"]}, "output_schema":{"keys":["status","result"]} },
+
+    { "name": "intent.unknown", "description": "No-op placeholder for unknown intents (safe sink).", "payload_schema": {"required":[]} }
   ]
 }

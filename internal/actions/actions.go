@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	htmlAct "a-a/internal/actions/html"
+	listAct "a-a/internal/actions/list"
 	"a-a/internal/actions/llm"
 	"a-a/internal/actions/system"
 	"a-a/internal/actions/test"
+	urlAct "a-a/internal/actions/url"
 	"a-a/internal/actions/web"
 	"a-a/internal/parser"
 )
@@ -30,6 +33,12 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 		return llm.HandleLlmAction(ctx, operation, action.Payload)
 	case "test":
 		return test.HandleTestAction(ctx, operation, action.Payload)
+	case "html":
+		return htmlAct.HandleHtmlAction(ctx, operation, action.Payload)
+	case "list":
+		return listAct.HandleListAction(ctx, operation, action.Payload)
+	case "url":
+		return urlAct.HandleURLAction(ctx, operation, action.Payload)
 	case "intent":
 		if operation == "unknown" {
 			return nil, nil
