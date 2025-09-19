@@ -14,7 +14,7 @@ import (
 
 const actionTimeout = 30 * time.Second
 
-func ExecutePlan(plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
+func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
 	mm := &metrics.MissionMetrics{
 		Start: time.Now(),
 	}
@@ -28,12 +28,19 @@ func ExecutePlan(plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
 	var resultsMutex sync.Mutex
 
 	for _, stage := range plan.Plan { // Stages are executed sequentially
+		// Check for cancellation before starting the stage
+		if err := ctx.Err(); err != nil {
+			mm.Succeeded = false
+			return mm, err
+		}
+
 		sm := metrics.StageMetrics{
 			Stage: stage.Stage,
 			Start: time.Now(),
 		}
 		// Cancellation signal for the stage (fail fast mechanism)
-		stageCtx, cancelStage := context.WithCancel(context.Background())
+		stageCtx, cancelStage := context.WithCancel(ctx)
+		defer cancelStage()
 
 		var wg sync.WaitGroup // A counter to notify when all goroutines are finished
 		errChan := make(chan error, len(stage.Actions))
@@ -107,9 +114,17 @@ func ExecutePlan(plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
 		sm.Finalize()
 		mm.Stages = append(mm.Stages, sm)
 		cancelStage()
+
+		// If any action failed, stop the mission.
 		if stageErr != nil {
 			mm.Succeeded = false
 			return mm, stageErr
+		}
+
+		// If mission was cancelled during/after stage, stop now.
+		if err := ctx.Err(); err != nil {
+			mm.Succeeded = false
+			return mm, err
 		}
 	}
 	mm.Succeeded = true

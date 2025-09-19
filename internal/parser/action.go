@@ -42,4 +42,7 @@ type GoalIntent struct {
 	RunManualPlans       bool     `json:"run_manual_plans"`      // true if user wants to execute plans from a JSON file
 	ManualPlansPath      string   `json:"manual_plans_path"`     // path to the JSON file
 	ManualPlanNames      []string `json:"manual_plan_names"`     // names to run (ordered). If empty → run all
+	Cancel               bool     `json:"cancel"`                // true if user asks to stop/abort/kill/cancel
+	TargetMissionID      string   `json:"target_mission_id"`     // mission/plan ID if provided
+	TargetIsPrevious     bool     `json:"target_is_previous"`    // true for "previous / last / most recent"
 }

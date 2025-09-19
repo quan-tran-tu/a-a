@@ -41,7 +41,12 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 
 		// Print mission completion without breaking current input
 		if result.Error != "" {
-			listener.AsyncPrintln(fmt.Sprintf("[Mission %s FAILED]", result.MissionID))
+			lbl := "FAILED"
+			lower := strings.ToLower(result.Error)
+			if strings.Contains(lower, "cancel") || strings.Contains(lower, "canceled") || strings.Contains(lower, "cancelled") {
+				lbl = "CANCELLED"
+			}
+			listener.AsyncPrintln(fmt.Sprintf("[Mission %s %s]", result.MissionID, lbl))
 		} else {
 			listener.AsyncPrintln(fmt.Sprintf("[Mission %s SUCCEEDED]", result.MissionID))
 		}
@@ -101,6 +106,27 @@ var rootCmd = &cobra.Command{
 			intent, err := parser.AnalyzeGoalIntent(intentCtx, inputText)
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Intent analysis FAILED] %v", err))
+				continue
+			}
+
+			if intent.Cancel {
+				if strings.TrimSpace(intent.TargetMissionID) != "" {
+					ok, err := supervisor.CancelMission(intent.TargetMissionID)
+					if err != nil {
+						listener.AsyncPrintln(fmt.Sprintf("[Cancel] %v", err))
+					} else if ok {
+						listener.AsyncPrintln(fmt.Sprintf("[Cancel] Requested cancellation for mission %s", intent.TargetMissionID))
+					} else {
+						listener.AsyncPrintln(fmt.Sprintf("[Cancel] Mission %s is not running", intent.TargetMissionID))
+					}
+				} else {
+					id, err := supervisor.CancelMostRecent()
+					if err != nil {
+						listener.AsyncPrintln(fmt.Sprintf("[Cancel] %v", err))
+					} else {
+						listener.AsyncPrintln(fmt.Sprintf("[Cancel] Requested cancellation for the current mission (%s)", id))
+					}
+				}
 				continue
 			}
 

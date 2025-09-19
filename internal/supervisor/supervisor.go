@@ -3,6 +3,10 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +18,10 @@ import (
 )
 
 var missionQueue = make(chan *Mission, 100) // Main work queue
+
+var curMu sync.Mutex
+var curMission *Mission
+var curCancel context.CancelFunc
 
 func StartSupervisor() {
 	go func() {
@@ -41,6 +49,40 @@ func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.Con
 	return id
 }
 
+// Cancel a specific mission by ID (works if it's the current running one).
+func CancelMission(id string) (bool, error) {
+	curMu.Lock()
+	defer curMu.Unlock()
+
+	if curMission == nil || curMission.State != StatusRunning {
+		return false, fmt.Errorf("no mission is currently running")
+	}
+	if id != "" && !strings.EqualFold(curMission.ID, id) {
+		return false, fmt.Errorf("mission %s is not running (current running: %s)", id, curMission.ID)
+	}
+	if curCancel == nil {
+		return false, fmt.Errorf("internal error: cancel function not set")
+	}
+	curCancel()
+	return true, nil
+}
+
+// Cancel the most recent / current mission.
+func CancelMostRecent() (string, error) {
+	curMu.Lock()
+	defer curMu.Unlock()
+
+	if curMission == nil || curMission.State != StatusRunning {
+		return "", fmt.Errorf("no mission is currently running")
+	}
+	if curCancel == nil {
+		return "", fmt.Errorf("internal error: cancel function not set")
+	}
+	id := curMission.ID
+	curCancel()
+	return id, nil
+}
+
 func runMission(m *Mission) {
 	var finalPlan string
 	var finalError error
@@ -55,20 +97,38 @@ func runMission(m *Mission) {
 		}
 	}
 
+	missionCtx, cancel := context.WithCancel(context.Background())
+	curMu.Lock()
+	curMission = m
+	curCancel = cancel
+	curMu.Unlock()
+	defer func() {
+		cancel()
+		curMu.Lock()
+		if curMission != nil && curMission.ID == m.ID {
+			curMission = nil
+			curCancel = nil
+		}
+		curMu.Unlock()
+	}()
+
 	for m.CurrentAttempt < m.MaxRetries {
 		m.CurrentAttempt++
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = ctx // (reserved)
-		cancel()
-
 		var execErr error
-		mm, execErr = executor.ExecutePlan(m.Plan) // <-- now gets metrics
+		mm, execErr = executor.ExecutePlan(missionCtx, m.Plan)
 		finalError = execErr
 
 		if execErr == nil {
 			logger.Log.Printf("Mission '%s' SUCCEEDED (ID: %s).", m.OriginalGoal, m.ID)
 			m.State = StatusSucceeded
+			break
+		}
+
+		// No retry if cancelled
+		if errors.Is(execErr, context.Canceled) || strings.Contains(strings.ToLower(execErr.Error()), "cancel") {
+			logger.Log.Printf("Mission '%s' CANCELLED (ID: %s).", m.OriginalGoal, m.ID)
+			m.State = StatusCancelled
 			break
 		}
 

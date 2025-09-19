@@ -50,13 +50,16 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 func buildIntentPrompt(userGoal string) string {
 	var sb strings.Builder
 	sb.WriteString("You are an expert user intent analyzer. Respond ONLY with this JSON (no extra text):\n")
-	sb.WriteString("{\"requires_confirmation\": <bool>, \"run_manual_plans\": <bool>, \"manual_plans_path\": \"<string or empty>\", \"manual_plan_names\": [<zero or more strings in order>]}\n\n")
+	sb.WriteString("{\"requires_confirmation\": <bool>, \"run_manual_plans\": <bool>, \"manual_plans_path\": \"<string or empty>\", \"manual_plan_names\": [<zero or more strings in order>], \"cancel\": <bool>, \"target_mission_id\": \"<string or empty>\", \"target_is_previous\": <bool>}\n\n")
 
 	sb.WriteString("Rules:\n")
 	sb.WriteString("- requires_confirmation: true ONLY if the user asks to see/review/confirm/approve/preview before execution OR uses verbs like 'show', 'list', 'preview'.\n")
 	sb.WriteString("- run_manual_plans: true if the user asks to execute (or show/preview) plans/missions from a local .json file.\n")
 	sb.WriteString("- manual_plans_path: extract the local .json path verbatim (quoted or unquoted). If none, use empty string.\n")
 	sb.WriteString("- manual_plan_names: if the user names specific missions, return them in order; otherwise an empty array. If empty and run_manual_plans is true, default behavior is to run ALL missions in the file.\n")
+	sb.WriteString("- cancel: true if the user asks to stop/abort/kill/cancel a mission or plan (treat plan == mission).\n")
+	sb.WriteString("- target_mission_id: if the user mentions a specific mission/plan ID, put it here (otherwise empty).\n")
+	sb.WriteString("- target_is_previous: true if the user says 'previous', 'last', or 'most recent' mission/plan (otherwise false).\n")
 	sb.WriteString("- Only consider local files ending with .json. Ignore URLs.\n\n")
 
 	sb.WriteString("Examples:\n")
@@ -114,6 +117,10 @@ func AnalyzeGoalIntent(ctx context.Context, userGoal string) (*GoalIntent, error
 
 	if !intent.RunManualPlans {
 		intent.ManualPlansPath = ""
+	}
+	if !intent.Cancel {
+		intent.TargetMissionID = ""
+		intent.TargetIsPrevious = false
 	}
 	return &intent, nil
 }

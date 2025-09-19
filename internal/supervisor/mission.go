@@ -6,6 +6,7 @@ const (
 	StatusRunning   = "RUNNING"
 	StatusSucceeded = "SUCCEEDED"
 	StatusFailed    = "FAILED"
+	StatusCancelled = "CANCELLED"
 )
 
 type Mission struct {
