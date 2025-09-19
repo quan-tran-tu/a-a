@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sync"
@@ -12,7 +13,36 @@ import (
 	"a-a/internal/parser"
 )
 
-const actionTimeout = 30 * time.Second
+const defaultActionTimeout = 30 * time.Second
+
+func computeActionTimeout(act parser.Action) time.Duration {
+	def, ok := parser.GetActionDefinition(act.Action)
+	if !ok {
+		return defaultActionTimeout
+	}
+	t := def.DefaultTimeoutMs
+	if def.TimeoutPerUnitMs > 0 && def.UnitCountField != "" {
+		if raw, ok := act.Payload[def.UnitCountField]; ok {
+			switch v := raw.(type) {
+			case string:
+				if v != "" {
+					var arr []any
+					if json.Unmarshal([]byte(v), &arr) == nil {
+						t += def.TimeoutPerUnitMs * len(arr)
+					}
+				}
+			case []any:
+				t += def.TimeoutPerUnitMs * len(v)
+			case []string:
+				t += def.TimeoutPerUnitMs * len(v)
+			}
+		}
+	}
+	if t <= 0 {
+		return defaultActionTimeout
+	}
+	return time.Duration(t) * time.Millisecond
+}
 
 func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan) (*metrics.MissionMetrics, error) {
 	mm := &metrics.MissionMetrics{
@@ -57,7 +87,7 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan) (*metrics.Miss
 				}()
 
 				// Add action timeout
-				actionCtx, cancelAction := context.WithTimeout(stageCtx, actionTimeout)
+				actionCtx, cancelAction := context.WithTimeout(stageCtx, computeActionTimeout(act))
 				defer cancelAction()
 
 				act.Payload = resolvePayload(act.Payload, results, &resultsMutex)

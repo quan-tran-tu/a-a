@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"a-a/internal/utils"
 )
 
-var httpClient = &http.Client{Timeout: 15 * time.Second}
+var httpClient = &http.Client{Timeout: 0}
 
 type httpResp struct {
 	URL        string `json:"url"`

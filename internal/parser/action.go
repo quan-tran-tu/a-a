@@ -24,6 +24,9 @@ type ActionDefinition struct {
 	OutputSchema struct {
 		Keys []string `json:"keys"`
 	} `json:"output_schema"`
+	DefaultTimeoutMs int    `json:"default_timeout_ms,omitempty"`
+	TimeoutPerUnitMs int    `json:"timeout_per_unit_ms,omitempty"`
+	UnitCountField   string `json:"unit_count_field,omitempty"`
 }
 
 type ActionRegistry struct {
@@ -45,4 +48,11 @@ type GoalIntent struct {
 	Cancel               bool     `json:"cancel"`                // true if user asks to stop/abort/kill/cancel
 	TargetMissionID      string   `json:"target_mission_id"`     // mission/plan ID if provided
 	TargetIsPrevious     bool     `json:"target_is_previous"`    // true for "previous / last / most recent"
+}
+
+func GetActionDefinition(actionName string) (ActionDefinition, bool) {
+	if registry == nil {
+		return ActionDefinition{}, false
+	}
+	return registry.GetDefinition(actionName)
 }
