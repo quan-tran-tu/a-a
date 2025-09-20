@@ -28,7 +28,7 @@ const (
 
 func HandleFlowAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
-	case "for_each":
+	case "foreach":
 		return foreach(ctx, payload)
 	default:
 		return nil, fmt.Errorf("unknown flow operation: %s", operation)

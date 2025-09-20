@@ -3,6 +3,8 @@
     - Write mock tests for actions (web, system)
     - Write E2E tests
 
+- Implement multiplan mission
+
 #### Use cases:
 1. Daily news briefing: \
 Fetch today news from a few news site (CNN, BBC,...) and summarize into a daily report
