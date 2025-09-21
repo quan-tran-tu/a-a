@@ -24,9 +24,7 @@ type ActionDefinition struct {
 	OutputSchema struct {
 		Keys []string `json:"keys"`
 	} `json:"output_schema"`
-	DefaultTimeoutMs int    `json:"default_timeout_ms,omitempty"`
-	TimeoutPerUnitMs int    `json:"timeout_per_unit_ms,omitempty"`
-	UnitCountField   string `json:"unit_count_field,omitempty"`
+	DefaultTimeoutMs int `json:"default_timeout_ms,omitempty"`
 }
 
 type ActionRegistry struct {

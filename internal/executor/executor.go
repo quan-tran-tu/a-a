@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sync"
@@ -21,23 +20,6 @@ func computeActionTimeout(act parser.Action) time.Duration {
 		return defaultActionTimeout
 	}
 	t := def.DefaultTimeoutMs
-	if def.TimeoutPerUnitMs > 0 && def.UnitCountField != "" {
-		if raw, ok := act.Payload[def.UnitCountField]; ok {
-			switch v := raw.(type) {
-			case string:
-				if v != "" {
-					var arr []any
-					if json.Unmarshal([]byte(v), &arr) == nil {
-						t += def.TimeoutPerUnitMs * len(arr)
-					}
-				}
-			case []any:
-				t += def.TimeoutPerUnitMs * len(v)
-			case []string:
-				t += def.TimeoutPerUnitMs * len(v)
-			}
-		}
-	}
 	if t <= 0 {
 		return defaultActionTimeout
 	}
