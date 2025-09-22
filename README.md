@@ -1,4 +1,4 @@
-# AI-Powered Autonomous Assistant (Go + Gemini)
+# AI-Powered Autonomous Assistant (Go + Gemini/Ollama)
 
 A smart command-line assistant that turns natural-language goals into structured plans and executes them **autonomously in the background**.
 
@@ -12,58 +12,53 @@ Built in Go with a clean **supervisor → executor** pipeline, **per-stage concu
 
 You type a goal; the assistant:
 
-* Analyzes intent (whether to **show/confirm** a plan, or run **manual plans** from a file).
-* Produces a **multi-stage JSON plan** where actions in the same stage run in parallel; stages run sequentially.
+* Analyzes intent (whether to **show/confirm**, **run manual plans** from a file, or **cancel**).
+* Produces a **multi-stage JSON plan** (stages run sequentially; actions in a stage run in parallel).
 * Enforces allowed actions & required payloads from `actions.json`.
+* Forbids intra-stage dependencies: if A needs B’s output, A goes in a **later** stage. References use:
 
-Plans can reference earlier outputs via:
+  ```
+  @results.<action_id>.<output_key>
+  ```
 
-```
-@results.<action_id>.<output_key>
-```
+### 2) Autonomous Execution & Re-Planning
 
-### 2) Autonomous Background Execution
+* Accepted plans run **in the background**; you get the prompt back immediately.
+* Plans can set `meta.replan=true` and write evidence to `meta.handoff_path`. The supervisor:
 
-If a plan needs confirmation (intent/risk), you’ll see a preview. Once accepted, the **mission runs in the background** and you immediately get your prompt back.
+  * Persists evidence under a mission scratch dir (`tmp/scratch/<id>/`),
+  * Generates a **follow-up plan** with `EVIDENCE` and `PREV_LAST_STAGE`,
+  * Shows a **re-plan preview** for approval when needed,
+  * Continues stage numbering across plans.
 
-```
-> create hello.md and write "hello" 10 times
-Generating plan for the above query, plan's ID: 4f69caf8 ...
-[Plan 4f69caf8 ACCEPTED] Mission 1a2b3c4d started
->
-... (later) ...
-[Mission 1a2b3c4d SUCCEEDED]
-```
+### 3) Safety, Confirmation & Cancellation
 
-### 3) Safety & Confirmation
+* Confirmation is triggered by **intent** (e.g., “show/preview”) or **risky actions** (see below).
+* Say “cancel” (or provide an ID) to stop the current mission.
+* Risk detection is centralized (`utils.IsPlanRisky`).
 
-Two triggers:
+### 4) Timeouts, Concurrency & Retries
 
-* **Intent**: e.g., “show/preview/confirm the plan”.
-* **Risky actions**: currently `system.delete_folder` (and reserved `system.execute_shell`) are treated as **risky**.
-
-Risky plans require **explicit approval**.
-
-### 4) Retries & Timeouts (Fail-fast per stage)
-
-* Actions inside a stage run concurrently with a **30s per-action timeout**.
-* If any action fails, the **stage cancels** (fail-fast).
-* Mission **retries up to 3 times** with brief backoff (same plan; re-planning is on the roadmap).
+* **Per-action timeout:** 30s (config in executor).
+* **Fail-fast per stage:** first failure cancels the stage.
+* **Retries:** up to 3 attempts with brief backoff.
+* `flow.foreach` uses bounded concurrency (**8**) and per-item timeout (defaults to 30s or the template action’s `default_timeout_ms` from the registry).
+* `web.batch_request` defaults to concurrency **5** (overridable via payload).
 
 ### 5) Short-term Memory
 
-The CLI keeps the last **3** turns (goal + plan + error) to give the planner context.
+* CLI keeps the last **3** turns (goal + plan + error) to give the planner context.
 
 ### 6) Metrics & Logging
 
-* Per-action and per-stage timing printed after completion.
-* All logs go to `assistant.log` (startup, plans, runs, errors, results).
+* Per-action and per-stage timing; printed upon completion.
+* All logs go to `assistant.log`.
 
 ---
 
 ## Implemented Actions (Current)
 
-### File system (`system.*`)
+### File System (`system.*`)
 
 * `system.create_file` — Create an empty file.
 * `system.delete_file` — Delete a file.
@@ -74,50 +69,114 @@ The CLI keeps the last **3** turns (goal + plan + error) to give the planner con
 * `system.read_file` — Returns `{ "content": string }`.
 * `system.list_directory` — Returns `{ "entries": []string }`.
 
+### Web I/O (`web.*`)
+
+* `web.request` — Single HTTP request (method, headers supported).
+* `web.batch_request` — Fetch many URLs concurrently; returns JSON array of `{url,status_code,content}`. Payload `concurrency` optional (default 5).
+
+### HTML Parsing (`html.*`)
+
+* `html.links` — Extract all `<a>` links `{text,url}`. **Provide `base_url`** to resolve relatives.
+* `html.links_bulk` — Like `links` but over a `pages_json` array (`{url,status_code,content}`).
+* `html.select_all` — CSS select; returns **outer HTML strings** array.
+* `html.select_attr` — CSS select and return a specific attribute from all matches.
+* `html.inner_text` — Return the document’s trimmed text.
+
+### Lists & URLs
+
+* `list.pluck` — From an array of **objects**, pluck a field → array of **strings**.
+* `list.unique` — Deduplicate any array.
+* `list.concat` — Concatenate two arrays.
+* `url.normalize` — Resolve relative URLs against `base_url`.
+
 ### LLM (`llm.*`)
 
-* `llm.generate_content` — Generate text with Gemini → `{ "generated_content": string }`.
-  *Model guardrail:* defaults to `gemini-2.0-flash` unless payload `model` starts with `gemini-`.
+* `llm.generate_content` — Free-form text → `{ "generated_content": string }`.
+* `llm.extract_structured` — Extract data that **conforms to a provided JSON schema** → `{ "json": "<strict JSON string>" }`.
+* `llm.select_from_list` — Return a **subset** of an input JSON array verbatim → `{ "selected_json": "<array JSON string>" }`.
 
-### Web (`web.*`)
+*(Gemini models are guard-railed: default `gemini-2.0-flash` unless payload `model` starts with `gemini-`. Ollama accepts any local model name as-is.)*
 
-* Placeholder for web related actions.
+### Flow Control (`flow.*`)
+
+* `flow.foreach` — Apply a single-item **template action** to each element in `items_json`.
+
+  * **Strict shape**:
+
+    ```json
+    {
+      "action": "flow.foreach",
+      "payload": {
+        "items_json": "<JSON array string>",
+        "template": {
+          "action": "<category.operation>",
+          "payload": { "... with {{item}} or {{item.field}} ..." }
+        }
+      }
+    }
+    ```
+  * Concurrency **8**; per-item timeout from registry default of the template action (else 30s).
+  * Returns:
+
+    * `"results_json"` — JSON array of successful inner outputs,
+    * `"errors_json"` — JSON array of `{item,error}`.
+
+### Test Utilities (`test.*`)
+
+* `test.sleep` — Sleep for `duration_ms`.
+* `test.fail` — Fail after `duration_ms` (useful to test fail-fast).
+* `test.sleep_with_return` — Sleep and return `{status,result}` (cancellable).
+
+> **Risky actions** (confirmation enforced via `utils.IsPlanRisky`):
+> `system.delete_folder`, reserved: `system.execute_shell`, `system.shutdown`.
 
 ---
 
 ## Architecture
 
 1. **CLI** (`internal/cli`)
-   REPL loop, recent history, confirmation, mission submission.
 
-2. **Planning & Intent** (`internal/parser/planner.go`)
+   * REPL loop, recent history, confirmation prompts.
+   * Flags: `--llm` (`gemini` | `ollama`), `--model-name`, `--ollama-host`.
+   * Handles re-plan previews via channels and y/n approval.
 
-   * `AnalyzeGoalIntent(goal)` → `{ requires_confirmation, run_manual_plans, manual_plans_path, manual_plan_names }`
-   * `GeneratePlan(history, goal)` → JSON plan (validated against `actions.json`)
+2. **Planning & Intent** (`internal/parser`)
+
+   * `AnalyzeGoalIntent(goal)` → `{ requires_confirmation, run_manual_plans, manual_plans_path, manual_plan_names, cancel, target_mission_id, target_is_previous }`
+   * `GeneratePlan(history, goal)` → JSON plan.
+   * Loads `actions.json` into a registry that:
+
+     * Builds the planner prompt section,
+     * Validates actions & required payloads,
+     * **Rejects intra-stage `@results` references**,
+     * Honors per-action `default_timeout_ms` for `flow.foreach` items.
 
 3. **Supervisor** (`internal/supervisor`)
-   Mission queue, retries, risk checks, and async result publication.
+
+   * Work queue, retries, cancellation (`cancel` or by ID).
+   * Evidence accumulation & **re-planning** with approval.
+   * Maintains a mission scratch dir (`tmp/scratch/<id>`).
+   * Continues stage numbering across re-plans.
 
 4. **Executor** (`internal/executor`)
 
-   * Stages sequential; actions within a stage **concurrent** (30s timeout/action).
-   * Replaces payload placeholders via `@results.<action_id>.<output_key>` before execution.
-   * Collects **per-action** and **per-stage** metrics.
+   * Stages sequential; actions parallel with **30s** timeout/action.
+   * Replaces payload placeholders from the **mission-shared results map**.
+   * Collects per-action and per-stage metrics.
 
 5. **Actions** (`internal/actions/...`)
 
-   * `actions.Execute` only **routes** to category handlers.
-   * Implementations live in subpackages:
-
-     * `actions/system`, `actions/llm`, `actions/web`, `actions/test`.
+   * Category dispatch + concrete handlers for `system`, `web`, `html`, `list`, `url`, `llm`, `flow`, `test`.
 
 6. **LLM Client** (`internal/llm_client`)
-   Thin wrapper around `google.golang.org/genai` with helpers:
 
-   * `InitGeminiClient()`, `Generate()`, `GenerateJSON()`.
+   * Pluggable providers: **Gemini** and **Ollama**.
+   * `Init(Config{Backend, Model, OllamaHost})`, `Generate`, `GenerateJSON`.
 
-7. **Display** (`internal/display`)
-   Pretty plan output, catalog printing, and metrics formatting.
+7. **Display & Logging**
+
+   * Pretty plan formatting (incl. meta: `plan_type`, `replan`, `handoff_path`).
+   * Metrics formatter; logs to `assistant.log`.
 
 ---
 
@@ -125,8 +184,9 @@ The CLI keeps the last **3** turns (goal + plan + error) to give the planner con
 
 Loaded at startup via `parser.LoadRegistry()` and used to:
 
-* Build the planner’s “available actions & payloads” prompt section.
-* Validate that LLM plans only use **allowed actions** with **required keys** present.
+* Build the planner’s **“available actions & payloads”** prompt section.
+* Validate that plans only use **allowed actions** with **required keys** present.
+* Supply optional `default_timeout_ms` per action (used by `flow.foreach` for item timeouts).
 
 **Example**
 
@@ -137,17 +197,12 @@ Loaded at startup via `parser.LoadRegistry()` and used to:
       "name": "system.create_file",
       "description": "Creates a new empty file.",
       "payload_schema": { "required": ["path"] },
-      "output_schema": { "keys": [] }
-    },
-    {
-      "name": "system.write_file",
-      "description": "Appends a line to a file (adds newline). Creates the file if missing.",
-      "payload_schema": { "required": ["path", "content"] },
-      "output_schema": { "keys": [] }
+      "output_schema": { "keys": [] },
+      "default_timeout_ms": 30000
     },
     {
       "name": "llm.generate_content",
-      "description": "Generates text using Gemini.",
+      "description": "Generates text.",
       "payload_schema": { "required": ["prompt"] },
       "output_schema": { "keys": ["generated_content"] }
     },
@@ -165,7 +220,7 @@ Loaded at startup via `parser.LoadRegistry()` and used to:
 
 ## Manual Missions from a JSON File
 
-Ask the assistant to **run plans from a file** (single or multiple). Supported shapes:
+Ask the assistant to **run plans from a file**. Supported shapes:
 
 1. **Object with `plans` (preferred)**
 
@@ -174,7 +229,7 @@ Ask the assistant to **run plans from a file** (single or multiple). Supported s
   "plans": [
     { "name": "alpha", "plan": [ { "stage": 1, "actions": [] } ] },
     { "plan": [ { "stage": 1, "actions": [] } ] },
-    [ { "stage": 1, "actions": [] } ]   // bare array entry
+    [ { "stage": 1, "actions": [] } ]
   ]
 }
 ```
@@ -208,53 +263,46 @@ or
 **Examples**
 
 ```
-> show plans from tests/test_plans.json
-# (prints catalog and asks to proceed)
-
-> execute the plans "Create file", "Import Data" in test.json
-# runs selected missions in order; warns if any names are missing
-
-> run all plans in scripts/batch.json
-# runs every valid mission in the file
+show plans from tests/test_plans.json
+execute the plans "Create file", "Import Data" in test.json
+run all plans in scripts/batch.json
 ```
 
 ---
 
 ## Installation & Run
 
-1. **Environment**
+### 1) Environment
+
+Create `.env` as needed:
 
 ```env
-# .env
+# For Gemini backend:
 GEMINI_API_KEY=your_api_key_here
+
+# For Ollama backend (optional if using default):
+OLLAMA_HOST=http://localhost:11434
 ```
 
-2. **Build**
+### 2) Build
 
 ```bash
 go mod tidy
 go build -o assistant ./cmd/assistant
 ```
 
-3. **Run**
+### 3) Run
 
 ```bash
-./assistant
-# or during development:
+# Development
 go run ./cmd/assistant
+
+# Choose backend/model
+go run ./cmd/assistant --llm gemini --model-name gemini-2.0-flash
+
+# Use Ollama (example)
+go run ./cmd/assistant --llm ollama --model-name llama3.2 --ollama-host http://localhost:11434
 ```
-
----
-
-## Testing
-
-Run all tests:
-
-```bash
-go test ./...
-```
-
-**Notes:** Current tests only cover a few unit tests.
 
 ---
 
@@ -271,6 +319,10 @@ Preview:
 ```
 Proposed execution plan:
 --------------------------------------------------
+Meta:
+  - plan_type: extraction
+  - replan: false
+  - handoff_path:
 Stage 1:
   - Action: system.create_file (ID: create_file)
     Payload:
@@ -285,82 +337,25 @@ Stage 3:
       path: hello.md
       content: @results.generate_content.generated_content
 --------------------------------------------------
-Do you want to execute this plan? [y/n] >
+Do you want to execute this plan? [y/n] 
+>
 ```
 
 ---
 
-## Timeouts, Concurrency & Errors
+## Testing
 
-* **Concurrency:** Actions within the same stage run in goroutines.
-* **Timeouts:** Each action has a **30s** timeout.
-* **Fail-fast:** First action error cancels the stage. Mission may retry up to **3** times.
-* **Placeholder resolution:** Strings matching `@results.<id>.<key>` (IDs/keys are `\w+`) are replaced with prior outputs before execution.
-
----
-
-## Project Layout (Current)
-
-```
-cmd/
-  assistant/
-    main.go            # boot: .env → logger → LLM → action registry → CLI
-
-internal/
-  actions/
-    actions.go         # dispatcher (category → handler)
-    llm/
-      llm.go           # llm calls handler
-    system/
-      system.go        # system ops handler
-    test/
-      test.go          # helpers handler for testing the architecture flow
-    web/
-      web.go           # placeholder
-  cli/
-    root.go            # REPL, history, confirmation, mission submission
-    execute.go
-  display/
-    plans.go           # plan formatting + catalog
-    metrics.go         # metrics formatting
-  executor/
-    executor.go        # per-stage concurrency, timeout, @results resolution
-    executor_test.go
-  listener/
-    listener.go        # readline-based UI helpers
-  llm_client/
-    gemini.go          # genai client, Generate/GenerateJSON helpers
-  logger/
-    logger.go
-  metrics/
-    metrics.go
-  parser/
-    action.go          # shared plan/registry types
-    plan_loader.go     # load/parse multi/single-plan JSON files
-    planner.go         # AnalyzeGoalIntent, GeneratePlan
-    registry.go        # load/validate action registry, prompt part
-    registry_test.go
-  supervisor/
-    mission.go         # mission model
-    result.go          # result channel payload
-    supervisor.go      # queue, retries, risk detection
-    supervisor_test.go
-  utils/
-    get_payload.go     # payload parsing helpers
+```bash
+go test ./...
 ```
 
 ---
 
 ## Troubleshooting
 
-* **`GEMINI_API_KEY` not set**
-  → “Could not initialize LLM client” — put the key in `.env`.
-
-* **`actions.json` missing/invalid**
-  → “Could not load action registry” — ensure file exists and matches the schema.
-
-* **Long steps time out**
-  → Increase `actionTimeout` in `internal/executor/executor.go`.
+* **Missing keys / invalid actions:** Ensure `actions.json` exists and matches the schema.
+* **`GEMINI_API_KEY` not set (Gemini backend):** Set it in `.env`.
+* **Long steps time out:** Increase the executor’s default per-action timeout or tune `default_timeout_ms` in `actions.json` (used by `flow.foreach` items).
 
 ---
 
