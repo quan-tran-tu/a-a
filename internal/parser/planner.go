@@ -154,7 +154,7 @@ func buildIntentPrompt(userGoal string) string {
 func GeneratePlan(ctx context.Context, history []ConversationTurn, userGoal string) (*ExecutionPlan, error) {
 	prompt := buildPlanPrompt(history, userGoal)
 
-	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "gemini-2.0-flash", nil)
+	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate plan from LLM: %w", err)
 	}
@@ -177,7 +177,7 @@ func GeneratePlan(ctx context.Context, history []ConversationTurn, userGoal stri
 func AnalyzeGoalIntent(ctx context.Context, userGoal string) (*GoalIntent, error) {
 	prompt := buildIntentPrompt(userGoal)
 
-	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "gemini-2.0-flash", nil)
+	cleanJson, err := llm_client.GenerateJSON(ctx, prompt, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate intent from LLM: %w", err)
 	}

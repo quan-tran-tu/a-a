@@ -12,11 +12,7 @@ import (
 
 // Hard guardrails on model names
 func allowedModelOrDefault(m string) string {
-	m = strings.TrimSpace(strings.ToLower(m))
-	if m == "" || !strings.HasPrefix(m, "gemini-") {
-		return "gemini-2.0-flash"
-	}
-	return m
+	return llm_client.AllowedModelOrDefault(m)
 }
 
 func GenerateContentGemini(ctx context.Context, prompt string, model_name string) (map[string]any, error) {

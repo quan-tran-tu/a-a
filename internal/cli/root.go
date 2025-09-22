@@ -16,6 +16,7 @@ import (
 
 	"a-a/internal/display"
 	"a-a/internal/listener"
+	"a-a/internal/llm_client"
 	"a-a/internal/logger"
 	"a-a/internal/parser"
 	"a-a/internal/supervisor"
@@ -63,6 +64,18 @@ func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync
 	}
 }
 
+var (
+	flagLLM        string
+	flagModelName  string
+	flagOllamaHost string
+)
+
+func init() {
+	rootCmd.PersistentFlags().StringVar(&flagLLM, "llm", "gemini", "LLM backend: gemini | ollama")
+	rootCmd.PersistentFlags().StringVar(&flagModelName, "model-name", "", "Model name, e.g. gemini-2.0-flash or llama3.2")
+	rootCmd.PersistentFlags().StringVar(&flagOllamaHost, "ollama-host", "", "Ollama host URL")
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "assistant",
 	Short: "A smart assistant CLI powered by Gemini",
@@ -73,6 +86,15 @@ var rootCmd = &cobra.Command{
 			os.Exit(1)
 		}
 		defer listener.Close()
+
+		if err := llm_client.Init(llm_client.Config{
+			Backend:    flagLLM,
+			Model:      flagModelName,
+			OllamaHost: flagOllamaHost,
+		}); err != nil {
+			fmt.Println("Failed to init LLM client:", err)
+			os.Exit(1)
+		}
 
 		supervisor.StartSupervisor()
 

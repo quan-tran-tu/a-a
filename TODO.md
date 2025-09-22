@@ -3,7 +3,7 @@
     - Write mock tests for actions (web, system)
     - Write E2E tests
 
-- Implement multiplan mission
+- Prompt need to be a bit stricter for ollama models
 
 #### Use cases:
 1. Daily news briefing: \
