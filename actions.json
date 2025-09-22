@@ -29,7 +29,7 @@
     { "name": "test.fail", "description": "Fails after a delay (in ms).", "payload_schema": {"required":["duration_ms"]}, "default_timeout_ms": 600000 },
     { "name": "test.sleep_with_return", "description": "Sleeps for a duration (in ms) with return values.", "payload_schema": {"required":["duration_ms"]}, "output_schema":{"keys":["status","result"]}, "default_timeout_ms": 600000 },
 
-    { "name": "flow.foreach", "description": "Iterate over items in a JSON array, executing a sub-action for each item concurrently.", "payload_schema": {"required":["items_json","action","template"]}, "output_schema":{"keys":["results_json"]}, "default_timeout_ms": 600000 },
+    { "name": "flow.foreach", "description": "Applies a template action to each item.", "payload_schema": {"required": ["items_json", "template"]}, "output_schema":{"keys":["results_json", "errors_json"]}, "default_timeout_ms": 600000 },
 
     { "name": "intent.unknown", "description": "No-op placeholder for unknown intents (safe sink).", "payload_schema": {"required":[]}, "default_timeout_ms": 1000 }
   ]

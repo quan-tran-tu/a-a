@@ -36,7 +36,7 @@ OUTPUT SHAPE (not a schema; just the shape):
 GLOBAL PRINCIPLES
 - Stages run SEQUENTIALLY; actions within a stage run IN PARALLEL.
 - Actions in the SAME stage must NOT reference "@results.<id>.<key>" of other actions (no dependencies within a stage). If A needs B's output, put A in a LATER stage.
-- Later stages may reference earlier outputs with "@results.<action_id>.<key>".
+- Later stages may reference earlier outputs with "@results.<action_id>.<key>", given that the outputs are from the actions from previous stages.
 - ALWAYS start at stage = 1. The runtime will renumber to continue after previous stages.
 - Do NOT invent URLs. Discover links from fetched HTML only.
 - Persist temporary artifacts under "tmp/". Final deliverables can be top-level files.
