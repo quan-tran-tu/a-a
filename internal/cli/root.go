@@ -88,12 +88,11 @@ var rootCmd = &cobra.Command{
 				pretty := display.FormatPlan(&plan)
 
 				listener.AsyncPrintln("\n[Re-plan proposed]\n" + pretty)
-				approved := listener.AskYesNo("Do you want to execute this plan?")
 
-				supervisor.PlanApprovalChannel <- supervisor.PlanApproval{
-					MissionID: prev.MissionID,
-					Approved:  approved,
-				}
+				approvalMu.Lock()
+				awaitingApproval = true
+				awaitingMissionID = prev.MissionID
+				approvalMu.Unlock()
 			}
 		}()
 
@@ -256,8 +255,6 @@ var rootCmd = &cobra.Command{
 			if needsConfirm {
 				pretty := display.FormatPlan(plan)
 				listener.AsyncPrintln(pretty)
-
-				listener.BeginInteractive()
 
 				if listener.AskYesNo("Do you want to execute this plan?") {
 

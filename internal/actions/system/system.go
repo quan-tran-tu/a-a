@@ -109,9 +109,7 @@ func WriteFileAtomic(path string, content string) error {
 func HandleSystemAction(ctx context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	path, err := utils.GetStringPayload(payload, "path")
 	if err != nil {
-		if _, ok := payload["content"]; !ok && (operation != "write_file" && operation != "write_file_atomic") {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	select {

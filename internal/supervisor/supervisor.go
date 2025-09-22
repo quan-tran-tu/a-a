@@ -295,9 +295,6 @@ func runMission(m *Mission) {
 				return
 			}
 
-			// Continue stage numbering before preview/execution
-			newPlan = renumberStages(newPlan, m.LastStage)
-
 			// Log full re-plan for audit
 			logger.Log.Printf("Proposing re-plan for mission %s (type=%s replan=%v):\n%s",
 				m.ID, newPlan.Meta.PlanType, newPlan.Meta.Replan, display.FormatPlanFull(newPlan))

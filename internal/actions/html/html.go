@@ -112,6 +112,35 @@ func handleLinksBulk(_ context.Context, payload map[string]any) (map[string]any,
 	return map[string]any{"links_json": string(b)}, nil
 }
 
+func handleSelectAttr(_ context.Context, payload map[string]any) (map[string]any, error) {
+	htmlStr, err := utils.GetStringPayload(payload, "html")
+	if err != nil {
+		return nil, err
+	}
+	selector, err := utils.GetStringPayload(payload, "selector")
+	if err != nil {
+		return nil, err
+	}
+	attr, err := utils.GetStringPayload(payload, "attr")
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := parseDoc(htmlStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse html: %w", err)
+	}
+
+	vals := make([]string, 0, 64)
+	doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+		if v, ok := s.Attr(attr); ok {
+			vals = append(vals, v)
+		}
+	})
+	b, _ := json.Marshal(vals)
+	return map[string]any{"values_json": string(b)}, nil
+}
+
 func handleSelectAll(_ context.Context, payload map[string]any) (map[string]any, error) {
 	html, err := utils.GetStringPayload(payload, "html")
 	if err != nil {
@@ -156,6 +185,8 @@ func HandleHtmlAction(ctx context.Context, operation string, payload map[string]
 		return handleSelectAll(ctx, payload)
 	case "inner_text":
 		return handleInnerText(ctx, payload)
+	case "select_attr":
+		return handleSelectAttr(ctx, payload)
 	default:
 		return nil, fmt.Errorf("unknown html operation: %s", operation)
 	}

@@ -111,7 +111,7 @@ func resolvePayload(payload map[string]any, results map[string]map[string]any, m
 	defer m.Unlock()
 
 	resolved := make(map[string]any)
-	re := regexp.MustCompile(`@results\.(\w+)\.(\w+)`)
+	re := regexp.MustCompile(`@results\.([A-Za-z0-9_\-]+)\.([A-Za-z0-9_]+)`)
 
 	for key, val := range payload {
 		strVal, ok := val.(string)

@@ -67,6 +67,19 @@ func (r *ActionRegistry) ValidateAction(action *Action) error {
 			return fmt.Errorf("action '%s' is missing required payload key: '%s'", action.Action, requiredKey)
 		}
 	}
+
+	if action.Action == "flow.foreach" {
+		tpl, ok := action.Payload["template"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("flow.foreach: payload.template must be an object")
+		}
+		if _, ok := tpl["action"].(string); !ok {
+			return fmt.Errorf("flow.foreach: template.action (string) is required")
+		}
+		if _, ok := tpl["payload"].(map[string]any); !ok {
+			return fmt.Errorf("flow.foreach: template.payload (object) is required")
+		}
+	}
 	return nil
 }
 

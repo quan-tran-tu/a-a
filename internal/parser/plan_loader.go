@@ -16,26 +16,47 @@ type NamedPlan struct {
 
 var resultsRefRe = regexp.MustCompile(`@results\.([A-Za-z0-9_\-]+)\.`)
 
-func validateStageDependencies(plan *ExecutionPlan) error {
-	seen := map[string]struct{}{} // action IDs completed in prior stages
-
-	for si, stage := range plan.Plan {
-		for _, act := range stage.Actions {
-			for _, v := range act.Payload {
-				s, ok := v.(string)
-				if !ok {
-					continue
-				}
-				matches := resultsRefRe.FindAllStringSubmatch(s, -1)
-				for _, m := range matches {
-					refID := m[1]
-					if _, ok := seen[refID]; !ok {
-						return fmt.Errorf("stage %d action '%s' references @results.%s, which is not available yet (same or later stage). Move this action to a later stage",
-							si+1, act.ID, refID)
-					}
-				}
+// All @results.<id> reference points only to IDs produced by PRIOR stages.
+func checkNoIntraStageRefs(v any, seen map[string]struct{}, stageIdx int, actID string) error {
+	switch t := v.(type) {
+	case map[string]any:
+		for _, vv := range t {
+			if err := checkNoIntraStageRefs(vv, seen, stageIdx, actID); err != nil {
+				return err
 			}
 		}
+	case []any:
+		for _, vv := range t {
+			if err := checkNoIntraStageRefs(vv, seen, stageIdx, actID); err != nil {
+				return err
+			}
+		}
+	case string:
+		matches := resultsRefRe.FindAllStringSubmatch(t, -1)
+		for _, m := range matches {
+			refID := m[1]
+			if _, ok := seen[refID]; !ok {
+				return fmt.Errorf(
+					"stage %d action '%s' references @results.%s, which is not available yet (same or later stage). Move this action to a later stage",
+					stageIdx+1, actID, refID,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+func validateStageDependencies(plan *ExecutionPlan) error {
+	seen := map[string]struct{}{} // IDs completed in prior stages
+
+	for si, stage := range plan.Plan {
+		// Check all actions' payloads in this stage
+		for _, act := range stage.Actions {
+			if err := checkNoIntraStageRefs(act.Payload, seen, si, act.ID); err != nil {
+				return err
+			}
+		}
+		// Mark actions from this stage as available for later stages
 		for _, act := range stage.Actions {
 			if act.ID != "" {
 				seen[act.ID] = struct{}{}
@@ -223,8 +244,5 @@ func ValidatePlan(plan *ExecutionPlan) error {
 			}
 		}
 	}
-	if err := validateStageDependencies(plan); err != nil {
-		return err
-	}
-	return nil
+	return validateStageDependencies(plan)
 }
