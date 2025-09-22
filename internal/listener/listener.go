@@ -10,6 +10,8 @@ import (
 
 var rl *readline.Instance
 var mu sync.Mutex
+var holdAsync bool
+var heldLines []string
 
 func Init() error {
 	var err error
@@ -35,7 +37,44 @@ func SetPrompt(p string) {
 	}
 }
 
-// Standard input (returns raw text; caller can lowercase if needed)
+func BeginInteractive() {
+	mu.Lock()
+	holdAsync = true
+	mu.Unlock()
+}
+
+func EndInteractive() {
+	mu.Lock()
+	defer mu.Unlock()
+	holdAsync = false
+	for _, s := range heldLines {
+		if rl == nil {
+			fmt.Println(s)
+		} else {
+			_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
+		}
+	}
+	heldLines = nil
+	if rl != nil {
+		rl.Refresh()
+	}
+}
+
+func printAboveUnlocked(s string) {
+	if rl == nil {
+		fmt.Println(s)
+		return
+	}
+	_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
+	rl.Refresh()
+}
+
+func PrintAbove(s string) {
+	mu.Lock()
+	defer mu.Unlock()
+	printAboveUnlocked(s)
+}
+
 func GetInput() string {
 	line, err := rl.Readline()
 	if err != nil {
@@ -44,7 +83,6 @@ func GetInput() string {
 	return strings.TrimSpace(line)
 }
 
-// Ask y/n (lowercased), with its own prompt, then restore default "> "
 func GetConfirmation(prompt string) string {
 	mu.Lock()
 	old := rl.Config.Prompt
@@ -63,16 +101,35 @@ func GetConfirmation(prompt string) string {
 	return ans
 }
 
-// Asynchronous safe println that doesn't destroy the current line.
-// It writes, then refreshes the input line with whatever the user was typing.
 func AsyncPrintln(s string) {
 	mu.Lock()
 	defer mu.Unlock()
+	if holdAsync {
+		heldLines = append(heldLines, s)
+		return
+	}
 	if rl == nil {
 		fmt.Println(s)
 		return
 	}
-	// Move to a new line, print, new line, then redraw the prompt + buffer
 	_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
 	rl.Refresh()
+}
+
+func AskYesNo(question string) bool {
+	BeginInteractive()
+	defer EndInteractive()
+
+	PrintAbove(question + " [y/n]")
+
+	for {
+		ans := GetConfirmation("> ")
+		if ans == "y" || ans == "yes" {
+			return true
+		}
+		if ans == "n" || ans == "no" {
+			return false
+		}
+		PrintAbove("Please answer y/n.")
+	}
 }

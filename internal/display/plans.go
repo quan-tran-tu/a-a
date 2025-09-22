@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"a-a/internal/parser"
-	"a-a/internal/supervisor"
+	"a-a/internal/utils"
 )
 
 const maxPayloadValueLength = 100
@@ -19,7 +19,7 @@ func FormatPlansCatalog(file string, plans []parser.NamedPlan) string {
 		for _, s := range p.Plan.Plan {
 			actions += len(s.Actions)
 		}
-		risky := supervisor.IsPlanRisky(p.Plan)
+		risky := utils.IsPlanRisky(p.Plan)
 		sb.WriteString(fmt.Sprintf("  %2d. %s  (stages=%d, actions=%d, risky=%v)\n",
 			i+1, p.Name, stages, actions, risky))
 	}
@@ -40,6 +40,9 @@ func formatPlanInternal(plan *parser.ExecutionPlan, limit int) string {
 	var sb strings.Builder
 	sb.WriteString("Proposed execution plan:\n")
 	sb.WriteString("--------------------------------------------------\n")
+
+	// Print out meta
+	sb.WriteString(fmt.Sprintf("Meta:\n  - plan_type: %s\n  - replan: %v\n  - handoff_path: %s\n", plan.Meta.PlanType, plan.Meta.Replan, plan.Meta.HandoffPath))
 
 	for _, stage := range plan.Plan {
 		sb.WriteString(fmt.Sprintf("Stage %d:\n", stage.Stage))

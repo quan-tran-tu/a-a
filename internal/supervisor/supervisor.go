@@ -5,16 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"a-a/internal/display"
 	"a-a/internal/executor"
 	"a-a/internal/logger"
 	"a-a/internal/metrics"
 	"a-a/internal/parser"
+	"a-a/internal/utils"
 )
 
 var missionQueue = make(chan *Mission, 100) // Main work queue
@@ -33,8 +37,8 @@ func StartSupervisor() {
 	}()
 }
 
-// Submit only after plan is known & confirmed
-func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.ConversationTurn) string {
+// Submit mission for execution
+func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.ConversationTurn, requireConfirm bool) string {
 	id := uuid.New().String()[:8]
 	newMission := &Mission{
 		ID:                  id,
@@ -44,12 +48,19 @@ func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.Con
 		MaxRetries:          3,
 		ConversationHistory: history,
 		Plan:                plan,
+		RequireConfirm:      requireConfirm,
+
+		// Multi-plan mission state
+		ScratchDir: "tmp/scratch/" + id,
+		Results:    make(map[string]map[string]any),
+		LastStage:  0,
 	}
+	_ = os.MkdirAll(newMission.ScratchDir, 0o755)
 	missionQueue <- newMission
 	return id
 }
 
-// Cancel a specific mission by ID (works if it's the current running one).
+// Cancel a specific mission by ID.
 func CancelMission(id string) (bool, error) {
 	curMu.Lock()
 	defer curMu.Unlock()
@@ -83,20 +94,66 @@ func CancelMostRecent() (string, error) {
 	return id, nil
 }
 
+// Read evidence from the given path, persist a copy in the mission scratch dir.
+func readAndPersistEvidence(m *Mission, path string) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		logger.Log.Printf("Evidence read failed (%s): %v", path, err)
+		return ""
+	}
+	content := string(b)
+	base := filepath.Base(path)
+	ts := time.Now().Format("20060102-150405")
+	dst := filepath.Join(m.ScratchDir, ts+"-"+base)
+	_ = os.WriteFile(dst, b, 0o644)
+	return content
+}
+
+func confirmNextPlanIfNeeded(m *Mission, p *parser.ExecutionPlan) bool {
+	// Require preview if user asked or plan is risky
+	need := m.RequireConfirm || utils.IsPlanRisky(p)
+	if !need {
+		return true
+	}
+	b, _ := json.Marshal(p)
+	PlanPreviewChannel <- PlanPreview{MissionID: m.ID, PlanJSON: string(b)}
+
+	// Wait for approval (serialized by mission for now)
+	for {
+		ans := <-PlanApprovalChannel
+		if ans.MissionID != m.ID {
+			continue
+		}
+		return ans.Approved
+	}
+}
+
 func runMission(m *Mission) {
 	var finalPlan string
 	var finalError error
-	var mm *metrics.MissionMetrics
+
+	overall := &metrics.MissionMetrics{Start: time.Now()}
+	defer func() {
+		overall.End = time.Now()
+		overall.DurationMs = overall.End.Sub(overall.Start).Milliseconds()
+	}()
 
 	logger.Log.Printf("Mission '%s' (ID: %s) executing", m.OriginalGoal, m.ID)
 
-	// Save plan string for history/result
-	if m.Plan != nil {
-		if b, err := json.Marshal(m.Plan); err == nil {
-			finalPlan = string(b)
-		}
+	planJSON := func(p *parser.ExecutionPlan) string {
+		b, _ := json.Marshal(p)
+		return string(b)
 	}
 
+	// Save initial plan JSON (initial preview handled by CLI)
+	if m.Plan != nil {
+		finalPlan = planJSON(m.Plan)
+	}
+
+	// Wire up cancel for the running mission
 	missionCtx, cancel := context.WithCancel(context.Background())
 	curMu.Lock()
 	curMission = m
@@ -112,64 +169,204 @@ func runMission(m *Mission) {
 		curMu.Unlock()
 	}()
 
-	for m.CurrentAttempt < m.MaxRetries {
-		m.CurrentAttempt++
-
+	for {
+		var mm *metrics.MissionMetrics
 		var execErr error
-		mm, execErr = executor.ExecutePlan(missionCtx, m.Plan)
-		finalError = execErr
+		m.CurrentAttempt = 0
 
-		if execErr == nil {
-			logger.Log.Printf("Mission '%s' SUCCEEDED (ID: %s).", m.OriginalGoal, m.ID)
-			m.State = StatusSucceeded
-			break
+		for m.CurrentAttempt < m.MaxRetries {
+			m.CurrentAttempt++
+
+			// Continue stage numbering across multi-plan mission
+			planForExec := renumberStages(m.Plan, m.LastStage)
+
+			// Execute with mission-shared results map
+			mm, execErr = executor.ExecutePlan(missionCtx, planForExec, m.Results, &m.ResultsMu)
+			if mm != nil {
+				overall.Stages = append(overall.Stages, mm.Stages...)
+			}
+
+			if execErr == nil {
+				m.LastStage = maxStage(planForExec) // Advance stage cursor
+				break                               // Plan succeeded
+			}
+
+			finalError = execErr
+
+			// No retry if cancelled
+			if errors.Is(execErr, context.Canceled) || strings.Contains(strings.ToLower(execErr.Error()), "cancel") {
+				logger.Log.Printf("Mission '%s' CANCELLED (ID: %s).", m.OriginalGoal, m.ID)
+				m.State = StatusCancelled
+				ResultChannel <- MissionResult{
+					MissionID:    m.ID,
+					OriginalGoal: m.OriginalGoal,
+					FinalPlan:    finalPlan,
+					Metrics:      overall,
+					Error:        execErr.Error(),
+				}
+				return
+			}
+
+			logger.Log.Printf("Mission '%s' FAILED on attempt %d/%d (ID: %s): %v",
+				m.OriginalGoal, m.CurrentAttempt, m.MaxRetries, m.ID, execErr)
+
+			// Remember failure in history
+			m.ConversationHistory = append(m.ConversationHistory, parser.ConversationTurn{
+				UserGoal:       m.OriginalGoal,
+				AssistantPlan:  finalPlan,
+				ExecutionError: execErr.Error(),
+			})
+
+			if m.CurrentAttempt >= m.MaxRetries {
+				m.State = StatusFailed
+				break
+			}
+			time.Sleep(1 * time.Second) // Naive backoff
 		}
 
-		// No retry if cancelled
-		if errors.Is(execErr, context.Canceled) || strings.Contains(strings.ToLower(execErr.Error()), "cancel") {
-			logger.Log.Printf("Mission '%s' CANCELLED (ID: %s).", m.OriginalGoal, m.ID)
-			m.State = StatusCancelled
-			break
+		// If the plan still failed after retries -> emit result & return
+		if execErr != nil {
+			ResultChannel <- MissionResult{
+				MissionID:    m.ID,
+				OriginalGoal: m.OriginalGoal,
+				FinalPlan:    finalPlan,
+				Metrics:      overall,
+				Error:        finalError.Error(),
+			}
+			return
 		}
 
-		logger.Log.Printf("Mission '%s' FAILED on attempt %d/%d (ID: %s): %v",
-			m.OriginalGoal, m.CurrentAttempt, m.MaxRetries, m.ID, execErr)
+		logger.Log.Printf("Plan completed (type=%s replan=%v).", m.Plan.Meta.PlanType, m.Plan.Meta.Replan)
 
-		failureTurn := parser.ConversationTurn{
-			UserGoal:       m.OriginalGoal,
-			AssistantPlan:  finalPlan,
-			ExecutionError: execErr.Error(),
+		// If plan requests a replan -> accumulate evidence, generate next plan, confirm, loop
+		if m.Plan.Meta.Replan {
+			// Accumulate evidence
+			ev := readAndPersistEvidence(m, m.Plan.Meta.HandoffPath)
+			if ev != "" {
+				if len(m.Evidence) > 0 {
+					m.Evidence += "\n\n---\n"
+				}
+				m.Evidence += ev
+			}
+
+			// Build new goal with bounded evidence and PREV_LAST_STAGE
+			const maxEv = 8000
+			evidenceSnippet := m.Evidence
+			if len(evidenceSnippet) > maxEv {
+				evidenceSnippet = evidenceSnippet[len(evidenceSnippet)-maxEv:]
+			}
+			newGoal := m.OriginalGoal
+			if evidenceSnippet != "" {
+				newGoal = fmt.Sprintf("%s\n\nPREV_LAST_STAGE: %d\n\nEVIDENCE:\n%s", newGoal, m.LastStage, evidenceSnippet)
+			} else {
+				newGoal = fmt.Sprintf("%s\n\nPREV_LAST_STAGE: %d", newGoal, m.LastStage)
+			}
+
+			// Generate next plan
+			planCtx, cancelPlan := context.WithTimeout(context.Background(), 20*time.Second)
+			newPlan, genErr := parser.GeneratePlan(planCtx, m.ConversationHistory, newGoal)
+			cancelPlan()
+			if genErr != nil {
+				logger.Log.Printf("Re-plan generation FAILED (mission %s): %v", m.ID, genErr)
+				finalError = fmt.Errorf("replan failed: %w", genErr)
+				m.State = StatusFailed
+				ResultChannel <- MissionResult{
+					MissionID:    m.ID,
+					OriginalGoal: m.OriginalGoal,
+					FinalPlan:    finalPlan,
+					Metrics:      overall,
+					Error:        finalError.Error(),
+				}
+				return
+			}
+
+			// Disallow reusing any existing action IDs (must reference via @results)
+			if err := checkDuplicateActionIDs(newPlan, m.Results); err != nil {
+				logger.Log.Printf("Re-plan generation FAILED (mission %s): %v", m.ID, err)
+				finalError = fmt.Errorf("replan failed: %w", err)
+				m.State = StatusFailed
+				ResultChannel <- MissionResult{
+					MissionID:    m.ID,
+					OriginalGoal: m.OriginalGoal,
+					FinalPlan:    finalPlan,
+					Metrics:      overall,
+					Error:        finalError.Error(),
+				}
+				return
+			}
+
+			// Continue stage numbering before preview/execution
+			newPlan = renumberStages(newPlan, m.LastStage)
+
+			// Log full re-plan for audit
+			logger.Log.Printf("Proposing re-plan for mission %s (type=%s replan=%v):\n%s",
+				m.ID, newPlan.Meta.PlanType, newPlan.Meta.Replan, display.FormatPlanFull(newPlan))
+
+			// Preview/confirm next plan (if required). Abort if user rejects.
+			if !confirmNextPlanIfNeeded(m, newPlan) {
+				m.State = StatusCancelled
+				ResultChannel <- MissionResult{
+					MissionID:    m.ID,
+					OriginalGoal: m.OriginalGoal,
+					FinalPlan:    planJSON(newPlan),
+					Metrics:      overall,
+					Error:        "replan rejected by user",
+				}
+				return
+			}
+
+			// Save new plan to history, switch, and loop again
+			if b, err := json.Marshal(newPlan); err == nil {
+				m.ConversationHistory = append(m.ConversationHistory, parser.ConversationTurn{
+					UserGoal:      newGoal,
+					AssistantPlan: string(b),
+				})
+			}
+			m.Plan = newPlan
+			finalPlan = planJSON(newPlan)
+			continue
 		}
-		m.ConversationHistory = append(m.ConversationHistory, failureTurn)
 
-		if m.CurrentAttempt >= m.MaxRetries {
-			m.State = StatusFailed
-			break
+		// No replan requested -> mission complete
+		m.State = StatusSucceeded
+		overall.Succeeded = true
+		ResultChannel <- MissionResult{
+			MissionID:    m.ID,
+			OriginalGoal: m.OriginalGoal,
+			FinalPlan:    finalPlan,
+			Metrics:      overall,
 		}
-
-		time.Sleep(1 * time.Second) // naive backoff
+		return
 	}
-
-	result := MissionResult{
-		MissionID:    m.ID,
-		OriginalGoal: m.OriginalGoal,
-		FinalPlan:    finalPlan,
-		Metrics:      mm,
-	}
-	if finalError != nil {
-		result.Error = finalError.Error()
-	}
-	ResultChannel <- result
 }
 
-// A list of risky actions that requires user confirmation
-func IsPlanRisky(plan *parser.ExecutionPlan) bool {
-	for _, stage := range plan.Plan {
-		for _, action := range stage.Actions {
-			if action.Action == "system.execute_shell" || action.Action == "system.delete_folder" {
-				return true
+func renumberStages(p *parser.ExecutionPlan, offset int) *parser.ExecutionPlan {
+	if p == nil || offset <= 0 {
+		return p
+	}
+	for i := range p.Plan {
+		p.Plan[i].Stage = p.Plan[i].Stage + offset
+	}
+	return p
+}
+
+func maxStage(p *parser.ExecutionPlan) int {
+	max := 0
+	for _, s := range p.Plan {
+		if s.Stage > max {
+			max = s.Stage
+		}
+	}
+	return max
+}
+
+func checkDuplicateActionIDs(p *parser.ExecutionPlan, existing map[string]map[string]any) error {
+	for _, s := range p.Plan {
+		for _, a := range s.Actions {
+			if _, exists := existing[a.ID]; exists {
+				return fmt.Errorf("action id '%s' already exists from a previous plan; use a new id and reference the old output via @results.%s.<key>", a.ID, a.ID)
 			}
 		}
 	}
-	return false
+	return nil
 }

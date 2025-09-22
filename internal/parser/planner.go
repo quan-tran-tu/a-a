@@ -12,10 +12,11 @@ import (
 var registry *ActionRegistry
 
 // Main prompt for generating plan of a mission
+// TODO: refine
 func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 	var sb strings.Builder
 
-	sb.WriteString("You are an expert AI workflow planner. Convert the user's goal into a STRICT JSON execution plan with schema: {\"plan\":[{\"stage\":<int>,\"actions\":[{\"id\":\"<slug>\",\"action\":\"<category.operation>\",\"payload\":{...}}]}]}.\n")
+	sb.WriteString("You are an expert AI workflow planner. Convert the user's goal into a STRICT JSON execution plan.\n")
 	sb.WriteString("Respond ONLY with JSON. No extra text.\n\n")
 
 	if len(history) > 0 {
@@ -23,33 +24,41 @@ func buildPlanPrompt(history []ConversationTurn, userGoal string) string {
 		for _, turn := range history {
 			sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", turn.UserGoal))
 			sb.WriteString(fmt.Sprintf("Previous Assistant Plan: %s\n", turn.AssistantPlan))
+			if strings.TrimSpace(turn.ExecutionError) != "" {
+				sb.WriteString(fmt.Sprintf("Previous Execution Error: %s\n", turn.ExecutionError))
+			}
 		}
 		sb.WriteString("\n")
 	}
 
+	sb.WriteString("OUTPUT JSON SCHEMA:\n")
+	sb.WriteString("{\"meta\": {\"plan_type\": \"<string>\", \"replan\": <bool>, \"handoff_path\": \"<string or empty>\"}, \"plan\": [{\"stage\": <int>, \"actions\": [{\"id\": \"<slug>\", \"action\": \"<category.operation>\", \"payload\": {}}]}]}\n\n")
+
 	sb.WriteString("SEMANTICS:\n")
 	sb.WriteString("- Actions in the SAME stage run IN PARALLEL.\n")
 	sb.WriteString("- Stages run SEQUENTIALLY (stage N completes before stage N+1).\n")
-	sb.WriteString("- Only outputs from PRIOR stages may be referenced via '@results.<action_id>.<key>'.\n\n")
+	sb.WriteString("- Later stages may reference earlier outputs via '@results.<action_id>.<key>'.\n")
+	sb.WriteString("- RE-PLANNING continues the SAME mission: do NOT redefine previously used action IDs; refer to their outputs instead. If the previous context includes 'PREV_LAST_STAGE: N', start your first stage at N+1.\n\n")
 
 	sb.WriteString(registry.GeneratePromptPart() + "\n")
 
 	sb.WriteString("\nHARD RULES:\n")
-	sb.WriteString("1) NO SAME-STAGE DEPENDENCIES: If an action references '@results.<id>', that referenced action MUST be in a STRICTLY EARLIER stage. Do not place dependent actions in the same stage. Within any stage, actions must be independent (no '@results' that point to same-stage IDs).\n")
-	sb.WriteString("2) NETWORK I/O: Use only 'web.request' (single) or 'web.batch_request' (many) for fetching content.\n")
-	sb.WriteString("3) LINK DISCOVERY: Discover links ONLY from provided HTML using 'html.links' (single page) or 'html.links_bulk' (multiple pages). Never invent URLs.\n")
-	sb.WriteString("4) URL LIST PIPELINE: When preparing URLs for batch fetching, use: 'list.pluck' (field=\"url\") → 'url.normalize' → 'list.unique'.\n")
-	sb.WriteString("5) BASE URL:\n")
-	sb.WriteString("   - For 'html.links', ALWAYS provide 'base_url' equal to the exact page URL whose HTML you pass.\n")
-	sb.WriteString("   - For 'url.normalize', provide an appropriate 'base_url' when inputs may be relative.\n")
-	sb.WriteString("   - For 'html.links_bulk', do NOT override per-page bases unless necessary (omit 'base_url' so each page's own URL is used).\n")
-	sb.WriteString("6) *_json PAYLOADS: Any payload key ending with '_json' (e.g., 'urls_json', 'list_json', 'pages_json', 'values_json') MUST be a STRING containing a valid JSON array. If empty, use \"[]\". Do NOT pass a bare array value.\n")
-	sb.WriteString("7) LIST FILTERING: Use 'llm.select_from_list' to select a subset from an array (verbatim copies of items). Do not rewrite items.\n")
-	sb.WriteString("8) STRUCTURED EXTRACTION: Use 'llm.extract_structured' to map raw HTML/text into a strict JSON schema. If a field is missing, output an empty string/array; never fabricate data.\n")
-	sb.WriteString("9) PERSISTENCE: Save files using 'system.write_file_atomic'.\n")
-	sb.WriteString("10) IDS: All action IDs must be unique, short, lowercase (e.g., 'fetch_seed', 'select_pages', 'fetch_profiles', 'extract_items').\n")
+	sb.WriteString("1) FIRST PLAN (UNSEEN URL): If the target page structure is unknown, your first plan MUST be an EXPLORATION with meta.plan_type=\"exploration\", meta.replan=true, and EXACTLY 2 stages:\n")
+	sb.WriteString("   - Stage 1: one 'web.request' to fetch the seed URL.\n")
+	sb.WriteString("   - Stage 2: one 'system.write_file_atomic' that writes a concise JSON evidence file to 'tmp/<name>.json'. The JSON should summarize only what helps the next plan (e.g., any discovered pagination hints, whether links look like profiles, simple selector hints). Do NOT include raw HTML or free text in this JSON.\n")
+	sb.WriteString("2) CONTENT–EXTENSION MATCH: Write JSON only to '.json' files. If you must persist raw HTML, use '.html' (under 'tmp/'). If free text, use '.txt'.\n")
+	sb.WriteString("3) TEMP ARTIFACTS: All temporary/intermediate artifacts (evidence, caches, snapshots) MUST be under 'tmp/'. Also ensure meta.handoff_path begins with 'tmp/'.\n")
+	sb.WriteString("4) CONTINUED STAGES: For follow-up plans, continue stage numbering after the previous plan’s last stage (look for 'PREV_LAST_STAGE: N' in the context). Do not restart from 1.\n")
+	sb.WriteString("5) DEPENDENCIES: NEVER reference '@results.<id>' from an action in the SAME stage. If A depends on B, place A in a LATER stage.\n")
+	sb.WriteString("6) NETWORK I/O: Use 'web.request' for single URLs. For lists, prefer 'flow.foreach' with 'template.action=web.request'. Do NOT invent URLs; discover links from actual HTML via 'html.links'/'html.links_bulk'.\n")
+	sb.WriteString("7) LIST TYPE DISCIPLINE: If you have an array of link OBJECTS, use 'list.pluck(field=\"url\")' to get an array of strings BEFORE 'url.normalize', 'list.unique', 'list.concat', or 'flow.foreach'. Never mix arrays of objects and arrays of strings.\n")
+	sb.WriteString("8) FOREACH SHAPE: 'flow.foreach' REQUIRES 'template.action' and 'template.payload'. Use '{{item}}' or '{{item.field}}' in 'template.payload'.\n")
+	sb.WriteString("9) STRUCTURED EXTRACTION: Use 'llm.extract_structured' to map provided text/HTML to a strict JSON schema; if a field is missing, output empty string/array; never invent facts.\n")
+	sb.WriteString("10) FINAL OUTPUTS: Persist final deliverables with 'system.write_file_atomic'. Final outputs need not be under 'tmp/'.\n")
+	sb.WriteString("11) IDS: Action IDs must be short, unique, lowercase across the WHOLE mission. Use new IDs in re-plans and reference old outputs via '@results.<old_id>.<key>'.\n")
+	sb.WriteString("12) URL RESOLUTION: Provide 'base_url' when calling 'html.links' and 'url.normalize' so relative hrefs resolve.\n\n")
 
-	sb.WriteString("\nNow, generate a plan for the following user goal:\n")
+	sb.WriteString("Generate the plan now for this goal:\n")
 	sb.WriteString(fmt.Sprintf("User Goal: \"%s\"\n", userGoal))
 	sb.WriteString("Assistant: ")
 

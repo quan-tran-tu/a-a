@@ -11,7 +11,14 @@ type ExecutionStage struct {
 	Actions []Action `json:"actions"`
 }
 
+type PlanMeta struct {
+	PlanType    string `json:"plan_type,omitempty"`    // "exploration", "extraction", ...
+	Replan      bool   `json:"replan,omitempty"`       // true if this plan is a replan
+	HandoffPath string `json:"handoff_path,omitempty"` // path to handoff context file if any
+}
+
 type ExecutionPlan struct {
+	Meta PlanMeta         `json:"meta,omitempty"`
 	Plan []ExecutionStage `json:"plan"`
 }
 
@@ -42,7 +49,7 @@ type GoalIntent struct {
 	RequiresConfirmation bool     `json:"requires_confirmation"` // true if user confirmation is needed before executing
 	RunManualPlans       bool     `json:"run_manual_plans"`      // true if user wants to execute plans from a JSON file
 	ManualPlansPath      string   `json:"manual_plans_path"`     // path to the JSON file
-	ManualPlanNames      []string `json:"manual_plan_names"`     // names to run (ordered). If empty → run all
+	ManualPlanNames      []string `json:"manual_plan_names"`     // names to run (ordered). If empty -> run all
 	Cancel               bool     `json:"cancel"`                // true if user asks to stop/abort/kill/cancel
 	TargetMissionID      string   `json:"target_mission_id"`     // mission/plan ID if provided
 	TargetIsPrevious     bool     `json:"target_is_previous"`    // true for "previous / last / most recent"

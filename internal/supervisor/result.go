@@ -10,5 +10,18 @@ type MissionResult struct {
 	Metrics      *metrics.MissionMetrics `json:"metrics,omitempty"`
 }
 
+type PlanPreview struct {
+	MissionID string `json:"mission_id"`
+	PlanJSON  string `json:"plan_json"`
+}
+
+type PlanApproval struct {
+	MissionID string `json:"mission_id"`
+	Approved  bool   `json:"approved"`
+}
+
+var PlanPreviewChannel = make(chan PlanPreview, 16)
+var PlanApprovalChannel = make(chan PlanApproval, 16)
+
 // Global channel for all mission results.
 var ResultChannel = make(chan MissionResult, 100)

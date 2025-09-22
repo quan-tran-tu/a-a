@@ -1,6 +1,10 @@
 package supervisor
 
-import "a-a/internal/parser"
+import (
+	"sync"
+
+	"a-a/internal/parser"
+)
 
 const (
 	StatusRunning   = "RUNNING"
@@ -17,4 +21,10 @@ type Mission struct {
 	MaxRetries          int
 	ConversationHistory []parser.ConversationTurn
 	Plan                *parser.ExecutionPlan
+	RequireConfirm      bool
+	ScratchDir          string
+	Evidence            string
+	Results             map[string]map[string]any
+	ResultsMu           sync.Mutex
+	LastStage           int
 }

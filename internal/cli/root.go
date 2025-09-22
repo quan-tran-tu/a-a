@@ -19,9 +19,15 @@ import (
 	"a-a/internal/logger"
 	"a-a/internal/parser"
 	"a-a/internal/supervisor"
+	"a-a/internal/utils"
 )
 
 const maxCliHistory = 3
+
+// Re-plan approval state (managed only by the main input loop)
+var approvalMu sync.Mutex
+var awaitingApproval bool
+var awaitingMissionID string
 
 func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync.Mutex) {
 	for result := range supervisor.ResultChannel {
@@ -74,6 +80,23 @@ var rootCmd = &cobra.Command{
 		var historyMutex sync.Mutex
 		go updateCliHistoryFromResults(&cliConversationHistory, &historyMutex)
 
+		// Plan preview handler: print only; approval is captured by main loop
+		go func() {
+			for prev := range supervisor.PlanPreviewChannel {
+				var plan parser.ExecutionPlan
+				_ = json.Unmarshal([]byte(prev.PlanJSON), &plan)
+				pretty := display.FormatPlan(&plan)
+
+				listener.AsyncPrintln("\n[Re-plan proposed]\n" + pretty)
+				approved := listener.AskYesNo("Do you want to execute this plan?")
+
+				supervisor.PlanApprovalChannel <- supervisor.PlanApproval{
+					MissionID: prev.MissionID,
+					Approved:  approved,
+				}
+			}
+		}()
+
 		// Graceful shutdown
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -95,20 +118,45 @@ var rootCmd = &cobra.Command{
 				continue
 			}
 
+			// If awaiting a re-plan approval, interpret this input as y/n and short-circuit.
+			approvalMu.Lock()
+			if awaitingApproval {
+				ans := strings.TrimSpace(strings.ToLower(inputText))
+				approved := (ans == "y" || ans == "yes")
+				supervisor.PlanApprovalChannel <- supervisor.PlanApproval{
+					MissionID: awaitingMissionID,
+					Approved:  approved,
+				}
+				// Clear state
+				awaitingApproval = false
+				awaitingMissionID = ""
+				approvalMu.Unlock()
+
+				if approved {
+					listener.AsyncPrintln("[Re-plan approved]")
+				} else {
+					listener.AsyncPrintln("[Re-plan rejected]")
+				}
+				continue
+			}
+			approvalMu.Unlock()
+
 			// Copy LLM context safely
 			historyMutex.Lock()
 			missionHistory := make([]parser.ConversationTurn, len(cliConversationHistory))
 			copy(missionHistory, cliConversationHistory)
 			historyMutex.Unlock()
 
+			// Intent analysis
 			intentCtx, cancelIntent := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancelIntent()
 			intent, err := parser.AnalyzeGoalIntent(intentCtx, inputText)
+			cancelIntent()
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Intent analysis FAILED] %v", err))
 				continue
 			}
 
+			// Cancellation flow
 			if intent.Cancel {
 				if strings.TrimSpace(intent.TargetMissionID) != "" {
 					ok, err := supervisor.CancelMission(intent.TargetMissionID)
@@ -130,6 +178,7 @@ var rootCmd = &cobra.Command{
 				continue
 			}
 
+			// Manual plans path
 			if intent.RunManualPlans && strings.TrimSpace(intent.ManualPlansPath) != "" {
 				plans, err := parser.LoadExecutionPlansFromFile(intent.ManualPlansPath)
 				if err != nil {
@@ -179,19 +228,20 @@ var rootCmd = &cobra.Command{
 					continue
 				}
 				for _, p := range valid {
-					missionID := supervisor.SubmitMission(p.Name, p.Plan, missionHistory)
+					manualNeedsConfirm := intent.RequiresConfirmation || utils.IsPlanRisky(p.Plan)
+					missionID := supervisor.SubmitMission(p.Name, p.Plan, missionHistory, manualNeedsConfirm)
 					listener.AsyncPrintln(fmt.Sprintf("[Manual] Submitted mission %s (%s)", missionID, p.Name))
 				}
 				continue
 			}
 
+			// Auto plan generation
 			planID := uuid.New().String()[:8]
 			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
-			// Context for intent recognition + plan generation
 			planBudgetCtx, cancelPlanBudget := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancelPlanBudget()
 			plan, err := parser.GeneratePlan(planBudgetCtx, missionHistory, inputText)
+			cancelPlanBudget()
 			if err != nil {
 				listener.AsyncPrintln(fmt.Sprintf("[Plan generation FAILED] %v", err))
 				continue
@@ -201,35 +251,26 @@ var rootCmd = &cobra.Command{
 			logger.Log.Printf("Plan %s for goal %q (FULL):\n%s",
 				planID, inputText, display.FormatPlanFull(plan))
 
-			// Log/preview plan for user if confirmation is needed or if risky
-			needsConfirm := intent.RequiresConfirmation || supervisor.IsPlanRisky(plan)
+			// Preview/confirm initial plan if needed
+			needsConfirm := intent.RequiresConfirmation || utils.IsPlanRisky(plan)
 			if needsConfirm {
 				pretty := display.FormatPlan(plan)
 				listener.AsyncPrintln(pretty)
 
-				var approved bool
-				for {
-					ans := listener.GetConfirmation("Do you want to execute this plan? [y/n] > ")
-					if ans == "y" || ans == "yes" {
-						approved = true
-						break
-					} else if ans == "n" || ans == "no" {
-						approved = false
-						break
-					} else {
-						listener.AsyncPrintln("Invalid input. Please enter 'y' or 'n'.")
-					}
-				}
+				listener.BeginInteractive()
 
-				if !approved {
+				if listener.AskYesNo("Do you want to execute this plan?") {
+
+				} else {
 					listener.AsyncPrintln(fmt.Sprintf("[Plan %s REJECTED]", planID))
 					continue
 				}
 			}
 
-			// Start mission in the background
-			missionID := supervisor.SubmitMission(inputText, plan, missionHistory)
+			// Start mission in the background (carry the confirmation policy forward)
+			missionID := supervisor.SubmitMission(inputText, plan, missionHistory, needsConfirm)
 
+			// Update history
 			if b, err := json.Marshal(plan); err == nil {
 				historyMutex.Lock()
 				cliConversationHistory = append(cliConversationHistory, parser.ConversationTurn{
