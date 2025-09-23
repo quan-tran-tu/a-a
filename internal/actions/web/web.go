@@ -6,11 +6,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"a-a/internal/utils"
 )
 
-var httpClient = &http.Client{Timeout: 0}
+var httpClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	},
+}
+
+const maxBodyBytes = 5 << 20 // 5MB
 
 type httpResp struct {
 	URL        string `json:"url"`
@@ -29,12 +42,19 @@ func doRequest(ctx context.Context, method, url string, headers map[string]strin
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+
+	// Cap body size
+	lr := io.LimitReader(resp.Body, maxBodyBytes+1)
+	b, _ := io.ReadAll(lr)
+	if int64(len(b)) > maxBodyBytes {
+		return nil, fmt.Errorf("response too large (> %d bytes)", maxBodyBytes)
+	}
 	return &httpResp{URL: url, StatusCode: resp.StatusCode, Content: string(b)}, nil
 }
 

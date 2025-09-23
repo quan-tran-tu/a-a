@@ -42,10 +42,7 @@ func Execute(ctx context.Context, action *parser.Action) (map[string]any, error)
 		return url.HandleURLAction(ctx, operation, action.Payload)
 	case "flow":
 		return flow.HandleFlowAction(ctx, operation, action.Payload)
-	case "intent":
-		if operation == "unknown" {
-			return nil, nil
-		}
+	default:
+		return nil, fmt.Errorf("unknown action category: %s", category)
 	}
-	return nil, fmt.Errorf("unknown action category: %s", category)
 }

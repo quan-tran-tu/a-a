@@ -21,12 +21,13 @@ const ollamaDefault = "phi4:latest"
 func (p *ollamaProvider) Init(cfg Config) error {
 	c, err := api.ClientFromEnvironment()
 	if err != nil {
-		host := cfg.OllamaHost
+		host := strings.TrimSpace(cfg.OllamaHost)
 		if host == "" {
-			host = "http://localhost:11434"
-		}
-		if host == "" {
-			host = os.Getenv("OLLAMA_HOST")
+			if hv := strings.TrimSpace(os.Getenv("OLLAMA_HOST")); hv != "" {
+				host = hv
+			} else {
+				host = "http://localhost:11434"
+			}
 		}
 		u, uerr := url.Parse(host)
 		if uerr != nil {

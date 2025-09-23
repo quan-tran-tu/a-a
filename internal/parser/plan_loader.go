@@ -237,8 +237,16 @@ func ValidatePlan(plan *ExecutionPlan) error {
 	if registry == nil {
 		return fmt.Errorf("action registry not loaded")
 	}
+	seen := map[string]struct{}{}
 	for _, stage := range plan.Plan {
 		for _, action := range stage.Actions {
+			if action.ID == "" {
+				return fmt.Errorf("action missing id")
+			}
+			if _, ok := seen[action.ID]; ok {
+				return fmt.Errorf("duplicate action id '%s' in plan", action.ID)
+			}
+			seen[action.ID] = struct{}{}
 			if err := registry.ValidateAction(&action); err != nil {
 				return err
 			}

@@ -4,28 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 
 	"a-a/internal/utils"
 )
-
-func normalizeOne(base, raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || raw == "" {
-		return raw
-	}
-	if u.IsAbs() {
-		return u.String()
-	}
-	if base == "" {
-		return raw
-	}
-	bu, err := url.Parse(base)
-	if err != nil {
-		return raw
-	}
-	return bu.ResolveReference(u).String()
-}
 
 func HandleURLAction(_ context.Context, operation string, payload map[string]any) (map[string]any, error) {
 	switch operation {
@@ -41,7 +22,7 @@ func HandleURLAction(_ context.Context, operation string, payload map[string]any
 		}
 		out := make([]string, 0, len(urls))
 		for _, u := range urls {
-			out = append(out, normalizeOne(base, u))
+			out = append(out, utils.Absolute(base, u))
 		}
 		b, _ := json.Marshal(out)
 		return map[string]any{"urls_json": string(b)}, nil

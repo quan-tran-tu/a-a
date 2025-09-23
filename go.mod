@@ -8,6 +8,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/ollama/ollama v0.12.0
 	github.com/spf13/cobra v1.10.1
+	golang.org/x/sync v0.13.0
 	google.golang.org/genai v1.23.0
 )
 

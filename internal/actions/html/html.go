@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -17,23 +16,7 @@ import (
 func parseDoc(html string) (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(strings.NewReader(html))
 }
-func absolute(base, href string) string {
-	u, err := url.Parse(href)
-	if err != nil || href == "" {
-		return href
-	}
-	if u.IsAbs() {
-		return u.String()
-	}
-	if base == "" {
-		return href
-	}
-	bu, err := url.Parse(base)
-	if err != nil {
-		return href
-	}
-	return bu.ResolveReference(u).String()
-}
+
 func outerHTML(sel *goquery.Selection) string {
 	var buf bytes.Buffer
 	for _, n := range sel.Nodes {
@@ -61,7 +44,7 @@ func handleLinks(_ context.Context, payload map[string]any) (map[string]any, err
 	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
 		href, _ := s.Attr("href")
 		t := strings.TrimSpace(s.Text())
-		out = append(out, link{Text: t, URL: absolute(baseURL, href)})
+		out = append(out, link{Text: t, URL: utils.Absolute(baseURL, href)})
 	})
 	b, _ := json.Marshal(out)
 	return map[string]any{"links_json": string(b)}, nil
@@ -105,7 +88,7 @@ func handleLinksBulk(_ context.Context, payload map[string]any) (map[string]any,
 			if baseURL != "" {
 				base = baseURL
 			}
-			out = append(out, link{Text: t, URL: absolute(base, href)})
+			out = append(out, link{Text: t, URL: utils.Absolute(base, href)})
 		})
 	}
 	b, _ := json.Marshal(out)

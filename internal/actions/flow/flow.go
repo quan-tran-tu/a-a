@@ -19,6 +19,8 @@ import (
 	"a-a/internal/actions/url"
 	"a-a/internal/actions/web"
 	"a-a/internal/parser"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -74,13 +76,13 @@ func foreach(parentCtx context.Context, payload map[string]any) (map[string]any,
 		idPrefix = "task_"
 	}
 
-	// derive per-item timeout from registry default of the template action
+	// Derive per-item timeout from registry default of the template action
 	perItemTimeout := time.Duration(defaultInnerMs) * time.Millisecond
 	if def, ok := parser.GetActionDefinition(tplAction); ok && def.DefaultTimeoutMs > 0 {
 		perItemTimeout = time.Duration(def.DefaultTimeoutMs) * time.Millisecond
 	}
 
-	// bounded concurrency
+	// Parent context for the batch
 	baseCtx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
@@ -91,23 +93,26 @@ func foreach(parentCtx context.Context, payload map[string]any) (map[string]any,
 	}
 
 	okResults := make([]okOut, len(items))
-	errResults := make([]errOut, 0)
+	errResults := make([]errOut, 0, 4)
+	var mu sync.Mutex
 
-	sem := make(chan struct{}, foreachConcurrency)
-	var wg sync.WaitGroup
-	var mu sync.Mutex // protects okResults / errResults
+	// Bounded concurrency with errgroup
+	g, gctx := errgroup.WithContext(baseCtx)
+	g.SetLimit(foreachConcurrency)
 
 	for i := range items {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(idx int) {
-			defer wg.Done()
-			defer func() { <-sem }()
+		idx := i
+		g.Go(func() error {
+			select {
+			case <-gctx.Done():
+				return nil
+			default:
+			}
 
 			item := items[idx]
 			itemID := fmt.Sprintf("%s%04d", idPrefix, idx+1)
 
-			// Build per-item payload
+			// Build per-item payload (deep copy + placeholder substitution)
 			itemPayload := deepCopyJSON(tplPayload).(map[string]any)
 			if v := substituteItemPlaceholders(itemPayload, item); v != nil {
 				mp, ok := v.(map[string]any)
@@ -115,28 +120,32 @@ func foreach(parentCtx context.Context, payload map[string]any) (map[string]any,
 					mu.Lock()
 					errResults = append(errResults, errOut{Item: item, Error: "template.payload not object after substitution"})
 					mu.Unlock()
-					return
+					return nil // swallow error to continue batch
 				}
 				itemPayload = mp
 			}
 
 			// Execute inner action with per-item timeout
-			itemCtx, itemCancel := context.WithTimeout(baseCtx, perItemTimeout)
+			itemCtx, itemCancel := context.WithTimeout(gctx, perItemTimeout)
 			defer itemCancel()
 
 			out, err := dispatch(itemCtx, tplAction, itemPayload)
+
 			mu.Lock()
-			defer mu.Unlock()
 			if err != nil {
 				errResults = append(errResults, errOut{Item: item, Error: err.Error()})
-				return
+				mu.Unlock()
+				return nil // Keep iterating other items
 			}
 			okResults[idx] = out
+			mu.Unlock()
 
 			_ = itemID
-		}(i)
+			return nil
+		})
 	}
-	wg.Wait()
+
+	_ = g.Wait() // Item errors are recorded, never abort the batch
 
 	compact := make([]okOut, 0, len(okResults))
 	for _, r := range okResults {

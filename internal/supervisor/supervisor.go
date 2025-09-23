@@ -27,6 +27,29 @@ var curMu sync.Mutex
 var curMission *Mission
 var curCancel context.CancelFunc
 
+const evidenceMaxBytes = 8000
+const evidenceSep = "\n\n---\n"
+
+// Append with a separator and keep only the last evidenceMaxBytes bytes.
+func appendEvidenceBounded(m *Mission, chunk string) {
+	if strings.TrimSpace(chunk) == "" {
+		return
+	}
+	var sb strings.Builder
+	if len(m.Evidence) > 0 {
+		sb.WriteString(m.Evidence)
+		sb.WriteString(evidenceSep)
+	}
+	sb.WriteString(chunk)
+	full := sb.String()
+
+	// Keep tail up to evidenceMaxBytes bytes.
+	if len(full) > evidenceMaxBytes {
+		full = full[len(full)-evidenceMaxBytes:]
+	}
+	m.Evidence = full
+}
+
 func StartSupervisor() {
 	go func() {
 		for mission := range missionQueue {
@@ -121,13 +144,20 @@ func confirmNextPlanIfNeeded(m *Mission, p *parser.ExecutionPlan) bool {
 	b, _ := json.Marshal(p)
 	PlanPreviewChannel <- PlanPreview{MissionID: m.ID, PlanJSON: string(b)}
 
+	timer := time.NewTimer(1 * time.Minute)
+	defer timer.Stop()
+
 	// Wait for approval (serialized by mission for now)
 	for {
-		ans := <-PlanApprovalChannel
-		if ans.MissionID != m.ID {
-			continue
+		select {
+		case ans := <-PlanApprovalChannel:
+			if ans.MissionID != m.ID {
+				continue
+			}
+			return ans.Approved
+		case <-timer.C:
+			return false
 		}
-		return ans.Approved
 	}
 }
 
@@ -242,24 +272,12 @@ func runMission(m *Mission) {
 		if m.Plan.Meta.Replan {
 			// Accumulate evidence
 			ev := readAndPersistEvidence(m, m.Plan.Meta.HandoffPath)
-			if ev != "" {
-				if len(m.Evidence) > 0 {
-					m.Evidence += "\n\n---\n"
-				}
-				m.Evidence += ev
-			}
+			appendEvidenceBounded(m, ev)
 
 			// Build new goal with bounded evidence and PREV_LAST_STAGE
-			const maxEv = 8000
-			evidenceSnippet := m.Evidence
-			if len(evidenceSnippet) > maxEv {
-				evidenceSnippet = evidenceSnippet[len(evidenceSnippet)-maxEv:]
-			}
-			newGoal := m.OriginalGoal
-			if evidenceSnippet != "" {
-				newGoal = fmt.Sprintf("%s\n\nPREV_LAST_STAGE: %d\n\nEVIDENCE:\n%s", newGoal, m.LastStage, evidenceSnippet)
-			} else {
-				newGoal = fmt.Sprintf("%s\n\nPREV_LAST_STAGE: %d", newGoal, m.LastStage)
+			newGoal := fmt.Sprintf("%s\n\nPREV_LAST_STAGE: %d", m.OriginalGoal, m.LastStage)
+			if strings.TrimSpace(m.Evidence) != "" {
+				newGoal = fmt.Sprintf("%s\n\nEVIDENCE:\n%s", newGoal, m.Evidence)
 			}
 
 			// Generate next plan

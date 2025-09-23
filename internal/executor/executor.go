@@ -10,11 +10,15 @@ import (
 	"a-a/internal/actions"
 	"a-a/internal/metrics"
 	"a-a/internal/parser"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const defaultActionTimeout = 30 * time.Second
+const stageConcurrencyDefault = 16
 
-// Accept mission-shared results + mutex
+var resultsRef = regexp.MustCompile(`@results\.([A-Za-z0-9_\-]+)\.([A-Za-z0-9_]+)`)
+
 func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan, sharedResults map[string]map[string]any, sharedMu *sync.Mutex) (*metrics.MissionMetrics, error) {
 	mm := &metrics.MissionMetrics{Start: time.Now()}
 	defer func() {
@@ -22,7 +26,7 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan, sharedResults 
 		mm.DurationMs = mm.End.Sub(mm.Start).Milliseconds()
 	}()
 
-	for _, stage := range plan.Plan { // Stages sequential
+	for _, stage := range plan.Plan { // stages sequential
 		if err := ctx.Err(); err != nil {
 			mm.Succeeded = false
 			return mm, err
@@ -30,27 +34,32 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan, sharedResults 
 
 		sm := metrics.StageMetrics{Stage: stage.Stage, Start: time.Now()}
 		stageCtx, cancelStage := context.WithCancel(ctx)
-		defer cancelStage()
 
-		var wg sync.WaitGroup
-		errChan := make(chan error, len(stage.Actions))
-		actMetChan := make(chan metrics.ActionMetrics, len(stage.Actions))
+		// errgroup to run actions in parallel with a concurrency cap
+		g, gctx := errgroup.WithContext(stageCtx)
+		g.SetLimit(stageConcurrencyDefault)
 
-		for _, action := range stage.Actions { // Actions parallel
-			wg.Add(1)
-			go func(act parser.Action) {
-				defer wg.Done()
+		var amu sync.Mutex // Protects sm.Actions
+
+		for _, action := range stage.Actions {
+			act := action
+			g.Go(func() (rerr error) {
+				// Panic safety -> convert to error so group cancels cleanly
 				defer func() {
-					if r := recover(); r != nil {
-						errChan <- fmt.Errorf("panic in action %s: %v", act.Action, r)
+					if rec := recover(); rec != nil {
+						rerr = fmt.Errorf("panic in action %s: %v", act.Action, rec)
 					}
 				}()
 
-				actionCtx, cancelAction := context.WithTimeout(stageCtx, defaultActionTimeout)
-				defer cancelAction()
-
-				// Resolve placeholders using mission-shared results
+				// Resolve placeholders using mission-shared results (snapshot inside)
 				act.Payload = resolvePayload(act.Payload, sharedResults, sharedMu)
+
+				timeout := defaultActionTimeout
+				if def, ok := parser.GetActionDefinition(act.Action); ok && def.DefaultTimeoutMs > 0 {
+					timeout = time.Duration(def.DefaultTimeoutMs) * time.Millisecond
+				}
+				actionCtx, cancelAction := context.WithTimeout(gctx, timeout)
+				defer cancelAction()
 
 				am := metrics.ActionMetrics{ID: act.ID, Action: act.Action, Start: time.Now()}
 				output, err := actions.Execute(actionCtx, &act)
@@ -61,37 +70,28 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan, sharedResults 
 					am.Err = err.Error()
 				}
 
-				actMetChan <- am
+				amu.Lock()
+				sm.Actions = append(sm.Actions, am)
+				amu.Unlock()
+
 				if err != nil {
-					errChan <- fmt.Errorf("action '%s' (%s) failed: %w", act.Action, act.ID, err)
-					return
+					return fmt.Errorf("action '%s' (%s) failed: %w", act.Action, act.ID, err)
 				}
 				if output != nil {
 					sharedMu.Lock()
-					sharedResults[act.ID] = output // Append into mission map
+					sharedResults[act.ID] = output
 					sharedMu.Unlock()
 				}
-			}(action)
+				return nil
+			})
 		}
 
-		waiter := make(chan struct{})
-		go func() { wg.Wait(); close(waiter) }()
+		stageErr := g.Wait()
+		cancelStage()
 
-		var stageErr error
-		select {
-		case stageErr = <-errChan:
-			cancelStage()
-			<-waiter
-		case <-waiter:
-		}
-		close(actMetChan)
-		for am := range actMetChan {
-			sm.Actions = append(sm.Actions, am)
-		}
 		sm.End = time.Now()
 		sm.Finalize()
 		mm.Stages = append(mm.Stages, sm)
-		cancelStage()
 
 		if stageErr != nil {
 			mm.Succeeded = false
@@ -102,35 +102,46 @@ func ExecutePlan(ctx context.Context, plan *parser.ExecutionPlan, sharedResults 
 			return mm, err
 		}
 	}
+
 	mm.Succeeded = true
 	return mm, nil
 }
 
 func resolvePayload(payload map[string]any, results map[string]map[string]any, m *sync.Mutex) map[string]any {
+	// Take a snapshot under lock
 	m.Lock()
-	defer m.Unlock()
+	snap := make(map[string]map[string]any, len(results))
+	for k, v := range results {
+		snap[k] = v
+	}
+	m.Unlock()
+	return resolvePayloadWithSnapshot(payload, snap)
+}
 
-	resolved := make(map[string]any)
-	re := regexp.MustCompile(`@results\.([A-Za-z0-9_\-]+)\.([A-Za-z0-9_]+)`)
+func resolvePayloadWithSnapshot(payload map[string]any, snap map[string]map[string]any) map[string]any {
+	resolved := make(map[string]any, len(payload))
 
 	for key, val := range payload {
-		strVal, ok := val.(string)
+		str, ok := val.(string)
 		if !ok {
 			resolved[key] = val
 			continue
 		}
-		resolvedVal := re.ReplaceAllStringFunc(strVal, func(match string) string {
-			parts := re.FindStringSubmatch(match)
-			actionID := parts[1]
-			outputKey := parts[2]
-			if resultData, ok := results[actionID]; ok {
-				if resultVal, ok := resultData[outputKey]; ok {
-					return fmt.Sprintf("%v", resultVal)
+
+		out := resultsRef.ReplaceAllStringFunc(str, func(match string) string {
+			sub := resultsRef.FindStringSubmatch(match)
+			if len(sub) != 3 {
+				return ""
+			}
+			actionID, outKey := sub[1], sub[2]
+			if m, ok := snap[actionID]; ok {
+				if v, ok := m[outKey]; ok {
+					return fmt.Sprintf("%v", v)
 				}
 			}
 			return ""
 		})
-		resolved[key] = resolvedVal
+		resolved[key] = out
 	}
 	return resolved
 }

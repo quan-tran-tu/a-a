@@ -43,7 +43,6 @@ func (r *ActionRegistry) GetDefinition(actionName string) (ActionDefinition, boo
 // Creates the text block for the LLM prompt
 func (r *ActionRegistry) GeneratePromptPart() string {
 	var sb strings.Builder
-	sb.WriteString("AVAILABLE ACTIONS & PAYLOADS:\n")
 	for _, action := range r.Actions {
 		requiredKeys := strings.Join(action.PayloadSchema.Required, ", ")
 		sb.WriteString(fmt.Sprintf("- `%s`: %s Payload requires keys: `[%s]`.", action.Name, action.Description, requiredKeys))

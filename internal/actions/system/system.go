@@ -53,7 +53,7 @@ func WriteFile(path string, content string) error {
 	}
 	defer file.Close()
 
-	if _, err := file.WriteString(content + "\n"); err != nil {
+	if _, err := file.WriteString(content); err != nil {
 		return fmt.Errorf("could not write to file: %w", err)
 	}
 
