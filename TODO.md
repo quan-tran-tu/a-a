@@ -4,6 +4,7 @@
     - Write E2E tests
 
 - Prompt need to be a bit stricter for ollama models
+- Truely gracefully stopping
 
 #### Use cases:
 1. Daily news briefing: \
