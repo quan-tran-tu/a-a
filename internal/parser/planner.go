@@ -126,7 +126,7 @@ AVAILABLE ACTIONS & PAYLOADS:
 func buildIntentPrompt(userGoal string) string {
 	var sb strings.Builder
 	sb.WriteString("You are an expert user intent analyzer. Respond ONLY with this JSON (no extra text):\n")
-	sb.WriteString("{\"requires_confirmation\": <bool>, \"run_manual_plans\": <bool>, \"manual_plans_path\": \"<string or empty>\", \"manual_plan_names\": [<zero or more strings in order>], \"cancel\": <bool>, \"target_mission_id\": \"<string or empty>\", \"target_is_previous\": <bool>}\n\n")
+	sb.WriteString("{\"requires_confirmation\": <bool>, \"run_manual_plans\": <bool>, \"manual_plans_path\": \"<string or empty>\", \"manual_plan_names\": [<zero or more strings>], \"cancel\": <bool>, \"target_mission_id\": \"<string or empty>\", \"target_is_previous\": <bool>, \"seed_plan_path\": \"<string or empty>\", \"seed_plan_names\": [<zero or more strings>]}\n\n")
 
 	sb.WriteString("Rules:\n")
 	sb.WriteString("- requires_confirmation: true ONLY if the user asks to see/review/confirm/approve/preview before execution OR uses verbs like 'show', 'list', 'preview'.\n")
@@ -136,13 +136,16 @@ func buildIntentPrompt(userGoal string) string {
 	sb.WriteString("- cancel: true if the user asks to stop/abort/kill/cancel a mission or plan (treat plan == mission).\n")
 	sb.WriteString("- target_mission_id: if the user mentions a specific mission/plan ID, put it here (otherwise empty).\n")
 	sb.WriteString("- target_is_previous: true if the user says 'previous', 'last', or 'most recent' mission/plan (otherwise false).\n")
+	sb.WriteString("- seed_plan_path: set this when the user asks to USE a plan file as the INITIAL/SEED steps for a larger goal (e.g., \"use test.json as the initial plan, then ...\"). Do NOT set run_manual_plans in this case.\n")
+	sb.WriteString("- seed_plan_names: if the user names specific plans inside that file, include them in order; empty means use the first plan.\n")
+	sb.WriteString("- If both 'run_manual_plans' and 'seed_plan_path' could apply, prefer 'seed_plan_path' when the user says words like 'initial', 'seed', 'start with', or implies chaining beyond the file.\n\n")
 	sb.WriteString("- Only consider local files ending with .json. Ignore URLs.\n\n")
 
 	sb.WriteString("Examples:\n")
-	sb.WriteString("User: \"show me the plans from tests/test_plans.json\"\n")
-	sb.WriteString("Assistant: {\"requires_confirmation\": true, \"run_manual_plans\": true, \"manual_plans_path\": \"tests/test_plans.json\", \"manual_plan_names\": []}\n\n")
-	sb.WriteString("User: \"execute the plans 'Create file', 'Import Data' in test.json\"\n")
-	sb.WriteString("Assistant: {\"requires_confirmation\": false, \"run_manual_plans\": true, \"manual_plans_path\": \"test.json\", \"manual_plan_names\": [\"Create file\", \"Import Data\"]}\n\n")
+	sb.WriteString("User: \"I have a plan at test_fetch.json; use it as the initial plan and then download hello.com/hello.pdf\"\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": false, \"run_manual_plans\": false, \"manual_plans_path\": \"\", \"manual_plan_names\": [], \"cancel\": false, \"target_mission_id\": \"\", \"target_is_previous\": false, \"seed_plan_path\": \"test_fetch.json\", \"seed_plan_names\": []}\n\n")
+	sb.WriteString("User: \"execute 'Alpha' and 'Beta' from plans.json\" (no mention of initial/seed)\n")
+	sb.WriteString("Assistant: {\"requires_confirmation\": false, \"run_manual_plans\": true, \"manual_plans_path\": \"plans.json\", \"manual_plan_names\": [\"Alpha\", \"Beta\"], \"cancel\": false, \"target_mission_id\": \"\", \"target_is_previous\": false, \"seed_plan_path\": \"\", \"seed_plan_names\": []}\n\n")
 
 	sb.WriteString("User Goal: \"")
 	sb.WriteString(userGoal)
@@ -194,6 +197,11 @@ func AnalyzeGoalIntent(ctx context.Context, userGoal string) (*GoalIntent, error
 	if !intent.Cancel {
 		intent.TargetMissionID = ""
 		intent.TargetIsPrevious = false
+	}
+	if strings.TrimSpace(intent.SeedPlanPath) != "" {
+		intent.RunManualPlans = false
+		intent.ManualPlansPath = ""
+		intent.ManualPlanNames = nil
 	}
 	return &intent, nil
 }

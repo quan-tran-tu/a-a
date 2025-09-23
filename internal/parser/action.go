@@ -53,6 +53,7 @@ type GoalIntent struct {
 	Cancel               bool     `json:"cancel"`                // true if user asks to stop/abort/kill/cancel
 	TargetMissionID      string   `json:"target_mission_id"`     // mission/plan ID if provided
 	TargetIsPrevious     bool     `json:"target_is_previous"`    // true for "previous / last / most recent"
+	SeedPlanPath         string   `json:"seed_plan_path"`        // path to the seed plan JSON file
 }
 
 func GetActionDefinition(actionName string) (ActionDefinition, bool) {

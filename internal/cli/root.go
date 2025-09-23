@@ -76,6 +76,39 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&flagOllamaHost, "ollama-host", "", "Ollama host URL")
 }
 
+// Try to make a file-based plan behave as an initial/seed plan for re-planning.
+func ensureSeedPlanDefaults(p *parser.ExecutionPlan) {
+	// 1) Force re-plan if user wants to continue after the seed
+	if !p.Meta.Replan {
+		p.Meta.Replan = true
+	}
+
+	// 2) If no handoff_path, try to infer it from a tmp/* write action
+	if strings.TrimSpace(p.Meta.HandoffPath) == "" {
+		if hp := inferHandoffFromWrites(p); hp != "" {
+			p.Meta.HandoffPath = hp
+		}
+	}
+}
+
+// Walk actions in stage order; pick the last tmp/* path written by system.write_file(_atomic)
+func inferHandoffFromWrites(p *parser.ExecutionPlan) string {
+	var hp string
+	for _, st := range p.Plan {
+		for _, a := range st.Actions {
+			if a.Action == "system.write_file" || a.Action == "system.write_file_atomic" {
+				if v, ok := a.Payload["path"].(string); ok {
+					s := strings.TrimSpace(v)
+					if strings.HasPrefix(s, "tmp/") {
+						hp = s
+					}
+				}
+			}
+		}
+	}
+	return hp
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "assistant",
 	Short: "A smart assistant CLI powered by Gemini",
@@ -195,6 +228,53 @@ var rootCmd = &cobra.Command{
 					} else {
 						listener.AsyncPrintln(fmt.Sprintf("[Cancel] Requested cancellation for the current mission (%s)", id))
 					}
+				}
+				continue
+			}
+
+			// Seed plan path
+			if strings.TrimSpace(intent.SeedPlanPath) != "" {
+				plans, err := parser.LoadExecutionPlansFromFile(intent.SeedPlanPath)
+				if err != nil {
+					listener.AsyncPrintln(fmt.Sprintf("[Seed] %v", err))
+					continue
+				}
+
+				if len(plans) == 0 {
+					listener.AsyncPrintln(fmt.Sprintf("[Seed] No missions found in %s", intent.SeedPlanPath))
+					continue
+				}
+				if len(plans) > 1 {
+					listener.AsyncPrintln(fmt.Sprintf("[Seed] Found more than one plan in %s, using the first one", intent.SeedPlanPath))
+				}
+
+				// Use the first as the seed plan
+				seed := plans[0].Plan
+
+				// Validate the seed plan structure
+				if err := parser.ValidatePlan(seed); err != nil {
+					listener.AsyncPrintln(fmt.Sprintf("[Seed] Invalid seed plan: %v", err))
+					continue
+				}
+
+				// Ensure the plan will trigger the re-plan loop and has a handoff evidence path
+				ensureSeedPlanDefaults(seed)
+
+				needsConfirm := intent.RequiresConfirmation || utils.IsPlanRisky(seed)
+				missionID := supervisor.SubmitMission(inputText, seed, missionHistory, needsConfirm)
+				listener.AsyncPrintln(fmt.Sprintf("[Seed] Submitted mission %s using %s as initial plan", missionID, intent.SeedPlanPath))
+
+				// Save to history
+				if b, err := json.Marshal(seed); err == nil {
+					historyMutex.Lock()
+					cliConversationHistory = append(cliConversationHistory, parser.ConversationTurn{
+						UserGoal:      inputText,
+						AssistantPlan: string(b),
+					})
+					if len(cliConversationHistory) > maxCliHistory {
+						cliConversationHistory = cliConversationHistory[1:]
+					}
+					historyMutex.Unlock()
 				}
 				continue
 			}
