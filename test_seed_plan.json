@@ -1,0 +1,35 @@
+{
+  "meta": {
+    "plan_type": "exploration",
+    "replan": true,
+    "handoff_path": "tmp/ollama_windows.html"
+  },
+  "plan": [
+    {
+      "stage": 1,
+      "actions": [
+        {
+          "id": "fetch_ollama",
+          "action": "web.request",
+          "payload": {
+            "url": "https://ollama.com/download/windows",
+            "method": "GET"
+          }
+        }
+      ]
+    },
+    {
+      "stage": 2,
+      "actions": [
+        {
+          "id": "save_html",
+          "action": "system.write_file_atomic",
+          "payload": {
+            "path": "tmp/ollama_windows.html",
+            "content": "@results.fetch_ollama.content"
+          }
+        }
+      ]
+    }
+  ]
+}
