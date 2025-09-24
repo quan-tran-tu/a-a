@@ -27,6 +27,9 @@ var curMu sync.Mutex
 var curMission *Mission
 var curCancel context.CancelFunc
 
+var workerWG sync.WaitGroup
+var closeOnce sync.Once
+
 const evidenceMaxBytes = 8000
 const evidenceSep = "\n\n---\n"
 
@@ -51,13 +54,34 @@ func appendEvidenceBounded(m *Mission, chunk string) {
 }
 
 func StartSupervisor() {
-	go func() {
+	workerWG.Go(func() {
 		for mission := range missionQueue {
 			logger.Log.Printf("[Supervisor] Starting mission '%s' (ID: %s)", mission.OriginalGoal, mission.ID)
 			mission.State = StatusRunning
 			runMission(mission)
 		}
+	})
+}
+
+// StopSupervisor closes the queue and waits for the worker to finish (or ctx timeout).
+func StopSupervisor(ctx context.Context) {
+	// Cancel current mission if any
+	_, _ = CancelMostRecent()
+
+	// Close queue only once
+	closeOnce.Do(func() { close(missionQueue) })
+
+	done := make(chan struct{})
+	go func() {
+		workerWG.Wait()
+		close(done)
 	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		// timeout/ctx cancel -> give up waiting
+	}
 }
 
 // Submit mission for execution
@@ -79,6 +103,7 @@ func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.Con
 		LastStage:  0,
 	}
 	_ = os.MkdirAll(newMission.ScratchDir, 0o755)
+	// Note: if missionQueue is closed due to shutdown, this send will panic.
 	missionQueue <- newMission
 	return id
 }

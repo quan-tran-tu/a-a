@@ -1,135 +1,123 @@
 package listener
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
-
-	"github.com/chzyer/readline"
 )
 
-var rl *readline.Instance
-var mu sync.Mutex
-var holdAsync bool
-var heldLines []string
+var (
+	sc        *bufio.Scanner
+	mu        sync.Mutex
+	curPrompt = "> "
+	prompting bool // True if waiting for input
+)
 
+// Init sets up a buffered scanner on stdin.
 func Init() error {
-	var err error
-	rl, err = readline.NewEx(&readline.Config{
-		Prompt:          "> ",
-		InterruptPrompt: "",
-		EOFPrompt:       "",
-	})
-	return err
-}
-
-func Close() {
-	if rl != nil {
-		_ = rl.Close()
-	}
+	sc = bufio.NewScanner(os.Stdin)
+	buf := make([]byte, 0, 64*1024)
+	sc.Buffer(buf, 1024*1024)
+	return nil
 }
 
 func SetPrompt(p string) {
 	mu.Lock()
 	defer mu.Unlock()
-	if rl != nil {
-		rl.SetPrompt(p)
-	}
+	curPrompt = p
 }
 
-func BeginInteractive() {
-	mu.Lock()
-	holdAsync = true
-	mu.Unlock()
-}
-
-func EndInteractive() {
+func printPrompt() {
 	mu.Lock()
 	defer mu.Unlock()
-	holdAsync = false
-	for _, s := range heldLines {
-		if rl == nil {
-			fmt.Println(s)
-		} else {
-			_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
+	fmt.Print(curPrompt)
+	prompting = true
+}
+
+func GetInput(ctx context.Context) string {
+	printPrompt()
+
+	lineCh := make(chan string, 1)
+
+	go func() {
+		if sc.Scan() {
+			lineCh <- sc.Text()
+			return
 		}
-	}
-	heldLines = nil
-	if rl != nil {
-		rl.Refresh()
-	}
-}
+		lineCh <- ""
+	}()
 
-func printAboveUnlocked(s string) {
-	if rl == nil {
-		fmt.Println(s)
-		return
-	}
-	_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
-	rl.Refresh()
-}
-
-func PrintAbove(s string) {
-	mu.Lock()
-	defer mu.Unlock()
-	printAboveUnlocked(s)
-}
-
-func GetInput() string {
-	line, err := rl.Readline()
-	if err != nil {
+	select {
+	case <-ctx.Done():
+		mu.Lock()
+		if prompting {
+			fmt.Print("\n")
+			prompting = false
+		}
+		mu.Unlock()
 		return ""
+	case line := <-lineCh:
+		mu.Lock()
+		prompting = false
+		mu.Unlock()
+		return strings.TrimSpace(line)
 	}
-	return strings.TrimSpace(line)
 }
 
-func GetConfirmation(prompt string) string {
+func GetConfirmation(ctx context.Context, prompt string) string {
 	mu.Lock()
-	old := rl.Config.Prompt
-	rl.SetPrompt(prompt)
+	old := curPrompt
+	curPrompt = prompt
 	mu.Unlock()
 
-	line, err := rl.Readline()
-	if err != nil {
-		line = ""
-	}
-	ans := strings.TrimSpace(strings.ToLower(line))
+	ans := GetInput(ctx)
 
 	mu.Lock()
-	rl.SetPrompt(old)
+	curPrompt = old
 	mu.Unlock()
-	return ans
+
+	return strings.TrimSpace(strings.ToLower(ans))
 }
 
 func AsyncPrintln(s string) {
 	mu.Lock()
 	defer mu.Unlock()
-	if holdAsync {
-		heldLines = append(heldLines, s)
-		return
-	}
-	if rl == nil {
+
+	if prompting {
+		fmt.Print("\r\n" + s + "\r\n")
+		fmt.Print(curPrompt)
+	} else {
 		fmt.Println(s)
-		return
 	}
-	_, _ = rl.Write([]byte("\r\n" + s + "\r\n"))
-	rl.Refresh()
 }
 
-func AskYesNo(question string) bool {
-	BeginInteractive()
-	defer EndInteractive()
+func AsyncPrintlnNoPrompt(s string) {
+	mu.Lock()
+	defer mu.Unlock()
+	if prompting {
+		fmt.Print("\r\n" + s + "\r\n")
+		prompting = false
+	} else {
+		fmt.Println(s)
+	}
+}
 
-	PrintAbove(question + " [y/n]")
+func AsyncPrintBlock(lines ...string) {
+	mu.Lock()
+	defer mu.Unlock()
 
-	for {
-		ans := GetConfirmation("> ")
-		if ans == "y" || ans == "yes" {
-			return true
+	if prompting {
+		fmt.Print("\r\n")
+		for _, s := range lines {
+			fmt.Println(s)
 		}
-		if ans == "n" || ans == "no" {
-			return false
+		fmt.Print(curPrompt)
+	} else {
+		for _, s := range lines {
+			fmt.Println(s)
 		}
-		PrintAbove("Please answer y/n.")
 	}
 }

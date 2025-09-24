@@ -30,36 +30,43 @@ var approvalMu sync.Mutex
 var awaitingApproval bool
 var awaitingMissionID string
 
-func updateCliHistoryFromResults(cliHistory *[]parser.ConversationTurn, mu *sync.Mutex) {
-	for result := range supervisor.ResultChannel {
-		mu.Lock()
-		newTurn := parser.ConversationTurn{
-			UserGoal:      result.OriginalGoal,
-			AssistantPlan: result.FinalPlan,
-		}
-		if result.Error != "" {
-			newTurn.ExecutionError = result.Error
-		}
-		*cliHistory = append(*cliHistory, newTurn)
-		if len(*cliHistory) > maxCliHistory {
-			*cliHistory = (*cliHistory)[1:]
-		}
-		mu.Unlock()
-
-		// Print mission completion without breaking current input
-		if result.Error != "" {
-			lbl := "FAILED"
-			lower := strings.ToLower(result.Error)
-			if strings.Contains(lower, "cancel") || strings.Contains(lower, "canceled") || strings.Contains(lower, "cancelled") {
-				lbl = "CANCELLED"
+func updateCliHistoryFromResults(ctx context.Context, cliHistory *[]parser.ConversationTurn, mu *sync.Mutex) {
+	for {
+		select {
+		case result := <-supervisor.ResultChannel:
+			mu.Lock()
+			newTurn := parser.ConversationTurn{
+				UserGoal:      result.OriginalGoal,
+				AssistantPlan: result.FinalPlan,
 			}
-			listener.AsyncPrintln(fmt.Sprintf("[Mission %s %s]", result.MissionID, lbl))
-		} else {
-			listener.AsyncPrintln(fmt.Sprintf("[Mission %s SUCCEEDED]", result.MissionID))
-		}
+			if result.Error != "" {
+				newTurn.ExecutionError = result.Error
+			}
+			*cliHistory = append(*cliHistory, newTurn)
+			if len(*cliHistory) > maxCliHistory {
+				*cliHistory = (*cliHistory)[1:]
+			}
+			mu.Unlock()
 
-		if result.Metrics != nil {
-			listener.AsyncPrintln(display.FormatMissionMetrics(result.Metrics))
+			// Print mission completion without breaking current input
+			lines := []string{}
+			if result.Error != "" {
+				lbl := "FAILED"
+				lower := strings.ToLower(result.Error)
+				if strings.Contains(lower, "cancel") || strings.Contains(lower, "canceled") || strings.Contains(lower, "cancelled") {
+					lbl = "CANCELLED"
+				}
+				lines = append(lines, fmt.Sprintf("[Mission %s %s]", result.MissionID, lbl))
+			} else {
+				lines = append(lines, fmt.Sprintf("[Mission %s SUCCEEDED]", result.MissionID))
+			}
+			if result.Metrics != nil {
+				lines = append(lines, display.FormatMissionMetrics(result.Metrics))
+			}
+			listener.AsyncPrintBlock(lines...)
+
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -111,14 +118,13 @@ func inferHandoffFromWrites(p *parser.ExecutionPlan) string {
 
 var rootCmd = &cobra.Command{
 	Use:   "assistant",
-	Short: "A smart assistant CLI powered by Gemini",
+	Short: "A smart assistant CLI powered by Gemini/Ollama",
 	Long:  `An intelligent assistant that understands your text input and performs actions autonomously in the background.`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if err := listener.Init(); err != nil {
 			fmt.Println("Failed to init terminal input:", err)
 			os.Exit(1)
 		}
-		defer listener.Close()
 
 		if err := llm_client.Init(llm_client.Config{
 			Backend:    flagLLM,
@@ -131,45 +137,62 @@ var rootCmd = &cobra.Command{
 
 		supervisor.StartSupervisor()
 
+		// Application lifetime context (cancelled on SIGINT/SIGTERM)
+		appCtx, appCancel := context.WithCancel(context.Background())
+		defer appCancel()
+
+		// Handle OS signals: cancel current mission, cancel app context, then let the loop exit.
+		sigc := make(chan os.Signal, 1)
+		signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigc
+			listener.AsyncPrintlnNoPrompt("Shutting down... (signal received)")
+			_, _ = supervisor.CancelMostRecent()
+			appCancel()
+		}()
+
 		var cliConversationHistory []parser.ConversationTurn
 		var historyMutex sync.Mutex
-		go updateCliHistoryFromResults(&cliConversationHistory, &historyMutex)
+		go updateCliHistoryFromResults(appCtx, &cliConversationHistory, &historyMutex)
 
 		// Plan preview handler: print only; approval is captured by main loop
-		go func() {
-			for prev := range supervisor.PlanPreviewChannel {
-				var plan parser.ExecutionPlan
-				_ = json.Unmarshal([]byte(prev.PlanJSON), &plan)
-				pretty := display.FormatPlan(&plan)
+		go func(ctx context.Context) {
+			for {
+				select {
+				case prev := <-supervisor.PlanPreviewChannel:
+					var plan parser.ExecutionPlan
+					_ = json.Unmarshal([]byte(prev.PlanJSON), &plan)
+					pretty := display.FormatPlan(&plan)
 
-				listener.AsyncPrintln("\n[Re-plan proposed]\n" + pretty)
+					listener.AsyncPrintln("\n[Re-plan proposed]\n" + pretty)
 
-				approvalMu.Lock()
-				awaitingApproval = true
-				awaitingMissionID = prev.MissionID
-				approvalMu.Unlock()
+					approvalMu.Lock()
+					awaitingApproval = true
+					awaitingMissionID = prev.MissionID
+					approvalMu.Unlock()
+
+				case <-ctx.Done():
+					return
+				}
 			}
-		}()
-
-		// Graceful shutdown
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-c
-			fmt.Println("\nGoodbye!")
-			os.Exit(0)
-		}()
+		}(appCtx)
 
 		listener.AsyncPrintln("Hello! How can I help you today? (type 'exit' or press Ctrl+C to quit)")
 
+	loop:
 		for {
-			inputText := listener.GetInput()
-			if strings.TrimSpace(strings.ToLower(inputText)) == "exit" {
-				fmt.Println("Goodbye!")
-				break
+			inputText := listener.GetInput(appCtx)
+
+			// Context cancelled -> quit cleanly
+			if appCtx.Err() != nil {
+				break loop
 			}
+			// EOF or empty line
 			if strings.TrimSpace(inputText) == "" {
 				continue
+			}
+			if strings.EqualFold(strings.TrimSpace(inputText), "exit") {
+				break loop
 			}
 
 			// If awaiting a re-plan approval, interpret this input as y/n and short-circuit.
@@ -202,7 +225,7 @@ var rootCmd = &cobra.Command{
 			historyMutex.Unlock()
 
 			// Intent analysis
-			intentCtx, cancelIntent := context.WithTimeout(context.Background(), 20*time.Second)
+			intentCtx, cancelIntent := context.WithTimeout(appCtx, 20*time.Second)
 			intent, err := parser.AnalyzeGoalIntent(intentCtx, inputText)
 			cancelIntent()
 			if err != nil {
@@ -308,7 +331,7 @@ var rootCmd = &cobra.Command{
 				if intent.RequiresConfirmation {
 					listener.AsyncPrintln(display.FormatPlansCatalog(intent.ManualPlansPath, plans))
 					listener.AsyncPrintln(fmt.Sprintf("About to run %d mission(s) from %s.", len(plans), intent.ManualPlansPath))
-					ans := listener.GetConfirmation("Proceed? [y/n] > ")
+					ans := listener.GetConfirmation(appCtx, "Proceed? [y/n] > ")
 					if ans != "y" && ans != "yes" {
 						listener.AsyncPrintln("[Manual] Cancelled.")
 						continue
@@ -340,7 +363,7 @@ var rootCmd = &cobra.Command{
 			planID := uuid.New().String()[:8]
 			listener.AsyncPrintln(fmt.Sprintf("Generating plan for the above query, plan's ID: %s ...", planID))
 
-			planBudgetCtx, cancelPlanBudget := context.WithTimeout(context.Background(), 20*time.Second)
+			planBudgetCtx, cancelPlanBudget := context.WithTimeout(appCtx, 20*time.Second)
 			plan, err := parser.GeneratePlan(planBudgetCtx, missionHistory, inputText)
 			cancelPlanBudget()
 			if err != nil {
@@ -358,8 +381,9 @@ var rootCmd = &cobra.Command{
 				pretty := display.FormatPlan(plan)
 				listener.AsyncPrintln(pretty)
 
-				if listener.AskYesNo("Do you want to execute this plan?") {
-
+				ans := listener.GetConfirmation(appCtx, "Do you want to execute this plan? [y/n] > ")
+				if ans == "y" || ans == "yes" {
+					// proceed
 				} else {
 					listener.AsyncPrintln(fmt.Sprintf("[Plan %s REJECTED]", planID))
 					continue
@@ -384,5 +408,12 @@ var rootCmd = &cobra.Command{
 
 			listener.AsyncPrintln(fmt.Sprintf("[Plan %s ACCEPTED] Mission %s started", planID, missionID))
 		}
+
+		// Graceful stop of the supervisor/worker
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stopCancel()
+		supervisor.StopSupervisor(stopCtx)
+
+		fmt.Println("Goodbye!")
 	},
 }
