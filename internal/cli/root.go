@@ -284,7 +284,11 @@ var rootCmd = &cobra.Command{
 				ensureSeedPlanDefaults(seed)
 
 				needsConfirm := intent.RequiresConfirmation || utils.IsPlanRisky(seed)
-				missionID := supervisor.SubmitMission(inputText, seed, missionHistory, needsConfirm)
+				missionID, err := supervisor.SubmitMission(inputText, seed, missionHistory, needsConfirm)
+				if err != nil {
+					listener.AsyncPrintln(fmt.Sprintf("[Seed] %v", err))
+					continue
+				}
 				listener.AsyncPrintln(fmt.Sprintf("[Seed] Submitted mission %s using %s as initial plan", missionID, intent.SeedPlanPath))
 
 				// Save to history
@@ -353,7 +357,11 @@ var rootCmd = &cobra.Command{
 				}
 				for _, p := range valid {
 					manualNeedsConfirm := intent.RequiresConfirmation || utils.IsPlanRisky(p.Plan)
-					missionID := supervisor.SubmitMission(p.Name, p.Plan, missionHistory, manualNeedsConfirm)
+					missionID, err := supervisor.SubmitMission(p.Name, p.Plan, missionHistory, manualNeedsConfirm)
+					if err != nil {
+						listener.AsyncPrintln(fmt.Sprintf("[Manual] %v", err))
+						continue
+					}
 					listener.AsyncPrintln(fmt.Sprintf("[Manual] Submitted mission %s (%s)", missionID, p.Name))
 				}
 				continue
@@ -391,7 +399,12 @@ var rootCmd = &cobra.Command{
 			}
 
 			// Start mission in the background (carry the confirmation policy forward)
-			missionID := supervisor.SubmitMission(inputText, plan, missionHistory, needsConfirm)
+			missionID, err := supervisor.SubmitMission(inputText, plan, missionHistory, needsConfirm)
+			if err != nil {
+				listener.AsyncPrintln(fmt.Sprintf("[Start] %v", err))
+				continue
+			}
+			listener.AsyncPrintln(fmt.Sprintf("[Plan %s ACCEPTED] Mission %s started", planID, missionID))
 
 			// Update history
 			if b, err := json.Marshal(plan); err == nil {
@@ -405,8 +418,6 @@ var rootCmd = &cobra.Command{
 				}
 				historyMutex.Unlock()
 			}
-
-			listener.AsyncPrintln(fmt.Sprintf("[Plan %s ACCEPTED] Mission %s started", planID, missionID))
 		}
 
 		// Graceful stop of the supervisor/worker

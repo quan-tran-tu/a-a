@@ -28,7 +28,9 @@ var curMission *Mission
 var curCancel context.CancelFunc
 
 var workerWG sync.WaitGroup
-var closeOnce sync.Once
+
+var enqueueMu sync.Mutex
+var accepting bool
 
 const evidenceMaxBytes = 8000
 const evidenceSep = "\n\n---\n"
@@ -54,6 +56,10 @@ func appendEvidenceBounded(m *Mission, chunk string) {
 }
 
 func StartSupervisor() {
+	enqueueMu.Lock()
+	accepting = true
+	enqueueMu.Unlock()
+
 	workerWG.Go(func() {
 		for mission := range missionQueue {
 			logger.Log.Printf("[Supervisor] Starting mission '%s' (ID: %s)", mission.OriginalGoal, mission.ID)
@@ -68,8 +74,12 @@ func StopSupervisor(ctx context.Context) {
 	// Cancel current mission if any
 	_, _ = CancelMostRecent()
 
-	// Close queue only once
-	closeOnce.Do(func() { close(missionQueue) })
+	enqueueMu.Lock()
+	if accepting {
+		accepting = false
+		close(missionQueue)
+	}
+	enqueueMu.Unlock()
 
 	done := make(chan struct{})
 	go func() {
@@ -85,7 +95,7 @@ func StopSupervisor(ctx context.Context) {
 }
 
 // Submit mission for execution
-func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.ConversationTurn, requireConfirm bool) string {
+func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.ConversationTurn, requireConfirm bool) (string, error) {
 	id := uuid.New().String()[:8]
 	newMission := &Mission{
 		ID:                  id,
@@ -103,9 +113,13 @@ func SubmitMission(goal string, plan *parser.ExecutionPlan, history []parser.Con
 		LastStage:  0,
 	}
 	_ = os.MkdirAll(newMission.ScratchDir, 0o755)
-	// Note: if missionQueue is closed due to shutdown, this send will panic.
+	enqueueMu.Lock()
+	defer enqueueMu.Unlock()
+	if !accepting {
+		return "", fmt.Errorf("supervisor is stopping; not accepting new missions")
+	}
 	missionQueue <- newMission
-	return id
+	return id, nil
 }
 
 // Cancel a specific mission by ID.
